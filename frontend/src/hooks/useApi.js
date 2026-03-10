@@ -155,7 +155,7 @@ export const useAttendance = () => {
   return {
     ...api,
     getAttendance: (params) => api.get('/attendance', params),
-    getAttendanceByDate: (date) => api.get(`/attendance/by-date/${date}`),
+    getByDate: (date) => api.get(`/attendance/by-date/${date}`),
     recordAttendance: (data) => api.post('/attendance', data),
     updateAttendance: (id, data) => api.put(`/attendance/${id}`, data)
   };

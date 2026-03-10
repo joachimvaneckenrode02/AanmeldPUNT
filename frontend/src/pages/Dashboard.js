@@ -49,7 +49,7 @@ export default function Dashboard() {
   const handleMarkRead = async (notificationId) => {
     try {
       await markNotificationRead(notificationId);
-      setAbsenceFeed(prev => prev.map(n => n.id === notificationId ? { ...n, read: true } : n));
+      setAbsenceFeed(prev => prev.filter(n => n.id !== notificationId));
     } catch (error) {}
   };
 
@@ -69,8 +69,8 @@ export default function Dashboard() {
 
   const showEducatorStats = canManageAttendance() || isAdmin();
   const showTeacherContent = isTeacher() || isAdmin();
-  const unreadCount = absenceFeed.filter(n => !n.read).length;
-  const displayFeed = showAllFeed ? absenceFeed : absenceFeed.slice(0, 5);
+  const unreadFeed = absenceFeed.filter(n => !n.read);
+  const displayFeed = showAllFeed ? unreadFeed : unreadFeed.slice(0, 5);
 
   return (
     <div className="space-y-8 animate-fadeIn" data-testid="dashboard">
@@ -93,22 +93,22 @@ export default function Dashboard() {
       </div>
 
       {/* Absence News Feed / Inbox */}
-      {showTeacherContent && absenceFeed.length > 0 && (
+      {showTeacherContent && unreadFeed.length > 0 && (
         <Card className="border-0 shadow-sm border-l-4 border-l-rose-500" data-testid="absence-feed">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg flex items-center gap-2">
                 <div className="relative">
                   <Inbox className="w-5 h-5 text-rose-600" />
-                  {unreadCount > 0 && (
+                  {unreadFeed.length > 0 && (
                     <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                      {unreadCount > 9 ? '9+' : unreadCount}
+                      {unreadFeed.length > 9 ? '9+' : unreadFeed.length}
                     </span>
                   )}
                 </div>
                 Afwezigheidsmeldingen
               </CardTitle>
-              <span className="text-sm text-slate-500">{absenceFeed.length} melding{absenceFeed.length !== 1 ? 'en' : ''}</span>
+              <span className="text-sm text-slate-500">{unreadFeed.length} ongelezen</span>
             </div>
           </CardHeader>
           <CardContent>
@@ -136,10 +136,10 @@ export default function Dashboard() {
                 </div>
               ))}
             </div>
-            {absenceFeed.length > 5 && (
+            {unreadFeed.length > 5 && (
               <Button variant="ghost" size="sm" className="w-full mt-2 text-slate-500"
                 onClick={() => setShowAllFeed(!showAllFeed)}>
-                {showAllFeed ? 'Minder tonen' : `Alle ${absenceFeed.length} meldingen tonen`}
+                {showAllFeed ? 'Minder tonen' : `Alle ${unreadFeed.length} meldingen tonen`}
               </Button>
             )}
           </CardContent>

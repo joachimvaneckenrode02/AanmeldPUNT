@@ -20,7 +20,8 @@ import {
   X,
   ChevronDown,
   GraduationCap,
-  UsersRound
+  UsersRound,
+  Bell
 } from 'lucide-react';
 
 const Sidebar = () => {
@@ -103,6 +104,8 @@ const Sidebar = () => {
         {canManageAttendance() && !isAdmin() && (
           <NavItem to="/admin/rapporten" icon={FileText} label="Rapportage" />
         )}
+        
+        <NavItem to="/meldingen" icon={Bell} label="Meldingen" />
 
         {isAdmin() && (
           <div className="pt-4 mt-4 border-t border-white/10">

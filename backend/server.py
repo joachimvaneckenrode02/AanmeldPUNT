@@ -1118,7 +1118,7 @@ async def get_registrations(
     if teacherEmail:
         query["teacherEmail"] = teacherEmail.lower()
     
-    registrations = await db.registrations.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
+    registrations = await db.registrations.find(query, {"_id": 0}).sort("createdAt", -1).to_list(1000)
     
     # Add class names
     for reg in registrations:
@@ -1145,7 +1145,7 @@ async def get_my_registrations(user: dict = Depends(get_current_user)):
     registrations = await db.registrations.find(
         {"teacherEmail": user["email"]},
         {"_id": 0}
-    ).sort("date", -1).to_list(1000)
+    ).sort("createdAt", -1).to_list(1000)
     
     # Get all attendance records for these registrations
     reg_ids = [r["id"] for r in registrations]
@@ -1306,35 +1306,53 @@ async def get_attendance(
 
 @api_router.get("/attendance/by-date/{date}", response_model=List[dict])
 async def get_attendance_by_date(date: str, user: dict = Depends(require_educator_or_admin)):
-    """Get all study moments and their registrations for a specific date"""
+    """Get all study moments and their registrations for a specific date. Auto-creates 'present' attendance records."""
     moments = await db.study_moments.find(
         {"date": date, "isActive": True},
         {"_id": 0}
     ).to_list(1000)
     
     result = []
+    now = now_iso()
     for moment in moments:
-        # Get study type
         study_type = await db.study_types.find_one({"id": moment["studyTypeId"]}, {"_id": 0})
         
-        # Get registrations
         registrations = await db.registrations.find(
             {"studyMomentId": moment["id"], "status": RegistrationStatus.REGISTERED},
             {"_id": 0}
         ).to_list(1000)
         
-        # Get attendance records
         attendance_records = await db.attendance.find(
             {"studyMomentId": moment["id"]},
             {"_id": 0}
         ).to_list(1000)
         attendance_map = {a["registrationId"]: a for a in attendance_records}
         
-        # Combine data
         students = []
         for reg in registrations:
             cls = await db.classes.find_one({"id": reg["classId"]}, {"_id": 0})
             att = attendance_map.get(reg["id"])
+            
+            # Auto-create attendance as 'present' if none exists
+            if not att:
+                att_doc = {
+                    "id": str(uuid.uuid4()),
+                    "registrationId": reg["id"],
+                    "studyMomentId": moment["id"],
+                    "date": reg["date"],
+                    "studentNameSnapshot": reg["studentName"],
+                    "classSnapshot": cls["name"] if cls else "Onbekend",
+                    "teacherEmailSnapshot": reg["teacherEmail"],
+                    "isPresent": True,
+                    "checkedAt": now,
+                    "checkedByUserId": user["id"],
+                    "note": None,
+                    "createdAt": now,
+                    "updatedAt": now
+                }
+                await db.attendance.insert_one(att_doc)
+                att = {k: v for k, v in att_doc.items() if k != "_id"}
+            
             students.append({
                 "registration": reg,
                 "className": cls["name"] if cls else "Onbekend",

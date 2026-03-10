@@ -16,6 +16,7 @@ import Registration from './pages/Registration';
 import AvailableStudies from './pages/AvailableStudies';
 import MyRegistrations from './pages/MyRegistrations';
 import Attendance from './pages/Attendance';
+import Notifications from './pages/Notifications';
 
 // Admin pages
 import AdminClasses from './pages/admin/Classes';
@@ -47,6 +48,7 @@ function App() {
             <Route path="beschikbaar" element={<AvailableStudies />} />
             <Route path="mijn-aanmeldingen" element={<MyRegistrations />} />
             <Route path="aanwezigheden" element={<Attendance />} />
+            <Route path="meldingen" element={<Notifications />} />
             
             {/* Admin routes */}
             <Route path="admin/klassen" element={<AdminClasses />} />
