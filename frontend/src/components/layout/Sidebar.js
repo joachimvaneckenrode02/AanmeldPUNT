@@ -84,7 +84,7 @@ const Sidebar = () => {
             <BookOpen className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-white">StudieReg</h1>
+            <h1 className="text-lg font-semibold text-white">AanmeldPUNT</h1>
             <p className="text-xs text-white/60">Studie Registratie</p>
           </div>
         </div>

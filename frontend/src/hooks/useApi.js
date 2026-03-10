@@ -179,7 +179,8 @@ export const useUsers = () => {
   return {
     ...api,
     getUsers: () => api.get('/users'),
-    updateUser: (id, data) => api.put(`/users/${id}`, data)
+    updateUser: (id, data) => api.put(`/users/${id}`, data),
+    deleteUser: (id) => api.del(`/users/${id}`)
   };
 };
 
@@ -227,6 +228,8 @@ export const useDashboard = () => {
   return {
     ...api,
     getStats: () => api.get('/dashboard/stats'),
-    seedData: () => api.post('/seed')
+    seedData: () => api.post('/seed'),
+    getAbsenceFeed: () => api.get('/notifications/absence-feed'),
+    markNotificationRead: (id) => api.request('patch', `/notifications/${id}/read`)
   };
 };

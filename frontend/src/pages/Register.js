@@ -62,7 +62,7 @@ export default function Register() {
               <BookOpen className="w-7 h-7" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold">StudieReg</h1>
+              <h1 className="text-2xl font-bold">AanmeldPUNT</h1>
               <p className="text-white/70 text-sm">Studie Registratie Systeem</p>
             </div>
           </div>
@@ -83,7 +83,7 @@ export default function Register() {
               <div className="w-10 h-10 rounded-xl bg-[#2E5C5A] flex items-center justify-center">
                 <BookOpen className="w-6 h-6 text-white" />
               </div>
-              <span className="text-xl font-bold text-[#2E5C5A]">StudieReg</span>
+              <span className="text-xl font-bold text-[#2E5C5A]">AanmeldPUNT</span>
             </div>
             <CardTitle className="text-2xl font-bold">Registreren</CardTitle>
             <CardDescription>

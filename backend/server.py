@@ -306,8 +306,8 @@ class EmailTemplateResponse(BaseModel):
 
 # Generate Study Moments Request
 class GenerateMomentsRequest(BaseModel):
-    startDate: str
-    endDate: str
+    startDate: Optional[str] = None
+    endDate: Optional[str] = None
     studyTypeIds: Optional[List[str]] = None
 
 # Student Models (for autocomplete)
@@ -661,6 +661,71 @@ async def toggle_study_type_active(type_id: str, user: dict = Depends(require_ad
 
 # ============ AVAILABILITY RULES ROUTES ============
 
+async def auto_generate_moments_for_rule(rule: dict):
+    """Automatically generate study moments for a rule's validity period"""
+    study_type = await db.study_types.find_one({"id": rule["studyTypeId"]}, {"_id": 0})
+    if not study_type:
+        return 0
+    
+    label = study_type["mainType"]
+    if study_type.get("subType"):
+        label += f" - {study_type['subType']}"
+    
+    # Get exclusion dates
+    exclusions = await db.exclusion_dates.find({"isActive": True}, {"_id": 0}).to_list(1000)
+    exclusion_map = {}
+    for ex in exclusions:
+        ex_date = ex["date"]
+        ex_types = ex.get("excludedStudyTypeIds") or []
+        if ex_date not in exclusion_map:
+            exclusion_map[ex_date] = {"all": False, "typeIds": set()}
+        if not ex_types:
+            exclusion_map[ex_date]["all"] = True
+        else:
+            exclusion_map[ex_date]["typeIds"].update(ex_types)
+    
+    start = datetime.fromisoformat(rule["validFrom"])
+    end = datetime.fromisoformat(rule["validUntil"])
+    now = now_iso()
+    created = 0
+    
+    current = start
+    while current <= end:
+        date_str = current.strftime("%Y-%m-%d")
+        weekday = current.weekday()
+        
+        if weekday != rule["weekday"]:
+            current += timedelta(days=1)
+            continue
+        
+        # Check exclusions
+        if date_str in exclusion_map:
+            if exclusion_map[date_str]["all"] or rule["studyTypeId"] in exclusion_map[date_str]["typeIds"]:
+                current += timedelta(days=1)
+                continue
+        
+        # Check if moment already exists
+        existing = await db.study_moments.find_one({
+            "date": date_str, "studyTypeId": rule["studyTypeId"], "startTime": rule["startTime"]
+        })
+        if existing:
+            current += timedelta(days=1)
+            continue
+        
+        moment_doc = {
+            "id": str(uuid.uuid4()), "date": date_str, "weekday": weekday,
+            "studyTypeId": rule["studyTypeId"], "labelFull": label,
+            "startTime": rule["startTime"], "endTime": rule["endTime"],
+            "capacity": rule["defaultCapacity"], "isActive": True, "notes": None,
+            "generatedFromRuleId": rule["id"], "createdAt": now, "updatedAt": now
+        }
+        await db.study_moments.insert_one(moment_doc)
+        created += 1
+        
+        current += timedelta(days=1)
+    
+    return created
+
 @api_router.get("/availability-rules", response_model=List[AvailabilityRuleResponse])
 async def get_availability_rules(user: dict = Depends(get_current_user), includeInactive: bool = False):
     query = {} if includeInactive else {"isActive": True}
@@ -682,6 +747,12 @@ async def create_availability_rule(data: AvailabilityRuleCreate, user: dict = De
     }
     await db.availability_rules.insert_one(doc)
     await log_audit(user["id"], "create", "availability_rule", doc["id"])
+    
+    # Auto-generate moments for the entire validity period
+    rule_data = {k: v for k, v in doc.items() if k != "_id"}
+    generated = await auto_generate_moments_for_rule(rule_data)
+    logger.info(f"Auto-generated {generated} moments for rule {doc['id']}")
+    
     return {k: v for k, v in doc.items() if k != "_id"}
 
 @api_router.put("/availability-rules/{rule_id}", response_model=AvailabilityRuleResponse)
@@ -698,6 +769,11 @@ async def update_availability_rule(rule_id: str, data: AvailabilityRuleCreate, u
     await log_audit(user["id"], "update", "availability_rule", rule_id)
     
     updated = await db.availability_rules.find_one({"id": rule_id}, {"_id": 0})
+    
+    # Auto-generate any missing moments for the updated rule
+    generated = await auto_generate_moments_for_rule(updated)
+    logger.info(f"Auto-generated {generated} additional moments for updated rule {rule_id}")
+    
     return updated
 
 @api_router.delete("/availability-rules/{rule_id}")
@@ -824,22 +900,30 @@ async def get_available_moments(
     
     result = []
     for moment in moments:
-        count = await db.registrations.count_documents({
-            "studyMomentId": moment["id"],
-            "status": RegistrationStatus.REGISTERED
-        })
+        regs = await db.registrations.find(
+            {"studyMomentId": moment["id"], "status": RegistrationStatus.REGISTERED},
+            {"_id": 0, "id": 1, "studentName": 1, "classId": 1, "className": 1}
+        ).to_list(1000)
+        
+        count = len(regs)
         available = moment["capacity"] - count
         
-        if available > 0:
-            # Get study type info
-            study_type = await db.study_types.find_one({"id": moment["studyTypeId"]}, {"_id": 0})
-            
-            result.append({
-                **moment,
-                "currentRegistrations": count,
-                "availableSpots": available,
-                "studyType": study_type
-            })
+        # Get study type info
+        study_type = await db.study_types.find_one({"id": moment["studyTypeId"]}, {"_id": 0})
+        
+        # Add class names to registrations
+        for reg in regs:
+            if "className" not in reg or not reg["className"]:
+                cls = await db.classes.find_one({"id": reg.get("classId")}, {"_id": 0})
+                reg["className"] = cls["name"] if cls else "Onbekend"
+        
+        result.append({
+            **moment,
+            "currentRegistrations": count,
+            "availableSpots": available,
+            "studyType": study_type,
+            "registrations": [{"studentName": r["studentName"], "className": r.get("className", "")} for r in regs]
+        })
     
     return result
 
@@ -938,112 +1022,70 @@ async def toggle_study_moment_active(moment_id: str, user: dict = Depends(requir
 
 @api_router.post("/study-moments/generate")
 async def generate_study_moments(data: GenerateMomentsRequest, user: dict = Depends(require_admin)):
-    """Generate study moments from availability rules"""
-    start = datetime.fromisoformat(data.startDate)
-    end = datetime.fromisoformat(data.endDate)
-    
-    if end < start:
-        raise HTTPException(status_code=400, detail="Einddatum moet na startdatum liggen")
-    
-    if (end - start).days > 365:
-        raise HTTPException(status_code=400, detail="Periode mag maximaal 1 jaar zijn")
-    
-    # Get exclusion dates
-    exclusions = await db.exclusion_dates.find({"isActive": True}, {"_id": 0}).to_list(1000)
-    # Build exclusion map: date -> list of excluded study type IDs (None means ALL excluded)
-    exclusion_map = {}
-    for ex in exclusions:
-        ex_date = ex["date"]
-        ex_types = ex.get("excludedStudyTypeIds") or []
-        if ex_date not in exclusion_map:
-            exclusion_map[ex_date] = {"all": False, "typeIds": set()}
-        if not ex_types:
-            # No specific types = all excluded
-            exclusion_map[ex_date]["all"] = True
-        else:
-            exclusion_map[ex_date]["typeIds"].update(ex_types)
-    
+    """Generate study moments from availability rules. Generates for the full validity period of each rule."""
     # Get active rules
     rules_query = {"isActive": True}
     if data.studyTypeIds:
         rules_query["studyTypeId"] = {"$in": data.studyTypeIds}
     
     rules = await db.availability_rules.find(rules_query, {"_id": 0}).to_list(1000)
+    if not rules:
+        raise HTTPException(status_code=400, detail="Geen actieve regels gevonden")
     
     created = 0
-    skipped = 0
-    now = now_iso()
     
-    current = start
-    while current <= end:
-        date_str = current.strftime("%Y-%m-%d")
-        weekday = current.weekday()
+    for rule in rules:
+        # Use specified dates or fall back to rule validity period
+        rule_start = data.startDate or rule["validFrom"]
+        rule_end = data.endDate or rule["validUntil"]
         
-        # Skip exclusion dates
-        if date_str in exclusion_map:
-            if exclusion_map[date_str]["all"]:
-                # All types excluded on this date
-                current += timedelta(days=1)
-                continue
-        
-        for rule in rules:
-            # Check if rule applies to this weekday
-            if rule["weekday"] != weekday:
-                continue
-            
-            # Check if date is within rule validity
-            if date_str < rule["validFrom"] or date_str > rule["validUntil"]:
-                continue
-            
-            # Check study-type-specific exclusion
-            if date_str in exclusion_map:
-                if rule["studyTypeId"] in exclusion_map[date_str]["typeIds"]:
-                    skipped += 1
-                    continue
-            
-            # Check if moment already exists
-            existing = await db.study_moments.find_one({
-                "date": date_str,
-                "studyTypeId": rule["studyTypeId"],
-                "startTime": rule["startTime"]
-            })
-            
-            if existing:
-                skipped += 1
-                continue
-            
-            # Get study type for label
-            study_type = await db.study_types.find_one({"id": rule["studyTypeId"]}, {"_id": 0})
-            if not study_type:
-                continue
-            
-            label = study_type["mainType"]
-            if study_type.get("subType"):
-                label += f" - {study_type['subType']}"
-            
-            moment_doc = {
-                "id": str(uuid.uuid4()),
-                "date": date_str,
-                "weekday": weekday,
-                "studyTypeId": rule["studyTypeId"],
-                "labelFull": label,
-                "startTime": rule["startTime"],
-                "endTime": rule["endTime"],
-                "capacity": rule["defaultCapacity"],
-                "isActive": True,
-                "notes": None,
-                "generatedFromRuleId": rule["id"],
-                "createdAt": now,
-                "updatedAt": now
-            }
-            
-            await db.study_moments.insert_one(moment_doc)
-            created += 1
-        
-        current += timedelta(days=1)
+        temp_rule = {**rule, "validFrom": rule_start, "validUntil": rule_end}
+        rule_created = await auto_generate_moments_for_rule(temp_rule)
+        created += rule_created
     
-    await log_audit(user["id"], "generate", "study_moments", "", {"created": created, "skipped": skipped})
-    return {"success": True, "created": created, "skipped": skipped}
+    await log_audit(user["id"], "generate", "study_moments", "", {"created": created})
+    return {"success": True, "created": created, "skipped": 0}
+
+@api_router.get("/notifications/absence-feed")
+async def get_absence_feed(user: dict = Depends(get_current_user)):
+    """Get recent absence notifications for the teacher's registered students"""
+    # Get all registrations by this teacher
+    my_regs = await db.registrations.find(
+        {"teacherEmail": user["email"], "status": RegistrationStatus.REGISTERED},
+        {"_id": 0}
+    ).sort("date", -1).to_list(5000)
+    
+    reg_ids = [r["id"] for r in my_regs]
+    
+    # Get attendance records that are absent
+    absent_attendance = await db.attendance.find(
+        {"registrationId": {"$in": reg_ids}, "isPresent": False},
+        {"_id": 0}
+    ).sort("checkedAt", -1).to_list(100)
+    
+    reg_map = {r["id"]: r for r in my_regs}
+    
+    feed = []
+    for att in absent_attendance:
+        reg = reg_map.get(att["registrationId"])
+        if not reg:
+            continue
+        feed.append({
+            "id": att["id"],
+            "studentName": reg["studentName"],
+            "className": reg.get("className", ""),
+            "studyLabel": reg.get("studyLabelSnapshot", ""),
+            "date": reg["date"],
+            "checkedAt": att.get("checkedAt", ""),
+            "read": att.get("readByTeacher", False)
+        })
+    
+    return feed[:50]
+
+@api_router.patch("/notifications/{notification_id}/read")
+async def mark_notification_read(notification_id: str, user: dict = Depends(get_current_user)):
+    await db.attendance.update_one({"id": notification_id}, {"$set": {"readByTeacher": True}})
+    return {"success": True}
 
 # ============ REGISTRATIONS ROUTES ============
 
@@ -1464,6 +1506,24 @@ async def update_user(user_id: str, data: UserUpdate, admin: dict = Depends(requ
     
     updated = await db.users.find_one({"id": user_id}, {"_id": 0, "passwordHash": 0})
     return updated
+
+@api_router.delete("/users/{user_id}")
+async def delete_user(user_id: str, admin: dict = Depends(require_admin)):
+    # Only superadmin can delete users
+    if admin["role"] != UserRole.SUPERADMIN:
+        raise HTTPException(status_code=403, detail="Alleen superadmin kan gebruikers verwijderen")
+    
+    existing = await db.users.find_one({"id": user_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Gebruiker niet gevonden")
+    
+    # Prevent self-deletion
+    if user_id == admin["id"]:
+        raise HTTPException(status_code=400, detail="U kunt uzelf niet verwijderen")
+    
+    await db.users.delete_one({"id": user_id})
+    await log_audit(admin["id"], "delete", "user", user_id, {"email": existing.get("email")})
+    return {"success": True}
 
 # ============ REPORTS ROUTES ============
 

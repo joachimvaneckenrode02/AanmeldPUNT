@@ -391,14 +391,14 @@ export default function AdminAvailability() {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2"><Label>Van datum *</Label><Input type="date" value={generateForm.startDate} onChange={(e) => setGenerateForm({ ...generateForm, startDate: e.target.value })} /></div>
-              <div className="space-y-2"><Label>Tot datum *</Label><Input type="date" value={generateForm.endDate} onChange={(e) => setGenerateForm({ ...generateForm, endDate: e.target.value })} /></div>
+              <div className="space-y-2"><Label>Van datum (optioneel)</Label><Input type="date" value={generateForm.startDate} onChange={(e) => setGenerateForm({ ...generateForm, startDate: e.target.value })} /></div>
+              <div className="space-y-2"><Label>Tot datum (optioneel)</Label><Input type="date" value={generateForm.endDate} onChange={(e) => setGenerateForm({ ...generateForm, endDate: e.target.value })} /></div>
             </div>
-            <p className="text-sm text-slate-500">Laat studiesoorten leeg om voor alle actieve types momenten te genereren. Bestaande momenten worden niet overschreven.</p>
+            <p className="text-sm text-slate-500">Laat datums leeg om momenten te genereren voor de volledige geldigheidsperiode van elke regel. Bestaande momenten worden niet overschreven.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setGenerateDialog({ open: false })}>Annuleren</Button>
-            <Button onClick={handleGenerate} disabled={momentsLoading || !generateForm.startDate || !generateForm.endDate}
+            <Button onClick={handleGenerate} disabled={momentsLoading}
               className="bg-[#D66D4F] hover:bg-[#c55f43]">
               {momentsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Genereren'}
             </Button>
