@@ -51,6 +51,7 @@ class UserRole:
     TEACHER = "teacher"
     ADMIN = "admin"
     EDUCATOR = "educator"
+    SUPERADMIN = "superadmin"
 
 class UserBase(BaseModel):
     name: str
@@ -307,6 +308,27 @@ class GenerateMomentsRequest(BaseModel):
     endDate: str
     studyTypeIds: Optional[List[str]] = None
 
+# Student Models (for autocomplete)
+class StudentBase(BaseModel):
+    name: str
+    classId: str
+    email: Optional[str] = None
+    isActive: bool = True
+
+class StudentCreate(StudentBase):
+    pass
+
+class StudentResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    name: str
+    classId: str
+    className: Optional[str] = None
+    email: Optional[str] = None
+    isActive: bool
+    createdAt: str
+    updatedAt: str
+
 # ============ HELPERS ============
 
 def hash_password(password: str) -> str:
@@ -343,12 +365,17 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         raise HTTPException(status_code=401, detail="Ongeldige token")
 
 async def require_admin(user: dict = Depends(get_current_user)):
-    if user.get("role") != UserRole.ADMIN:
+    if user.get("role") not in [UserRole.ADMIN, UserRole.SUPERADMIN]:
         raise HTTPException(status_code=403, detail="Admin rechten vereist")
     return user
 
+async def require_superadmin(user: dict = Depends(get_current_user)):
+    if user.get("role") != UserRole.SUPERADMIN:
+        raise HTTPException(status_code=403, detail="Superadmin rechten vereist")
+    return user
+
 async def require_educator_or_admin(user: dict = Depends(get_current_user)):
-    if user.get("role") not in [UserRole.ADMIN, UserRole.EDUCATOR]:
+    if user.get("role") not in [UserRole.ADMIN, UserRole.EDUCATOR, UserRole.SUPERADMIN]:
         raise HTTPException(status_code=403, detail="Opvoeder of admin rechten vereist")
     return user
 
@@ -980,17 +1007,37 @@ async def get_registrations(
     
     return registrations
 
-@api_router.get("/registrations/my", response_model=List[RegistrationResponse])
+@api_router.get("/registrations/my", response_model=List[dict])
 async def get_my_registrations(user: dict = Depends(get_current_user)):
-    """Get registrations created by current user"""
+    """Get registrations created by current user with attendance status"""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
     registrations = await db.registrations.find(
         {"teacherEmail": user["email"]},
         {"_id": 0}
     ).sort("date", -1).to_list(1000)
     
+    # Get all attendance records for these registrations
+    reg_ids = [r["id"] for r in registrations]
+    attendance_records = await db.attendance.find(
+        {"registrationId": {"$in": reg_ids}},
+        {"_id": 0}
+    ).to_list(1000)
+    attendance_map = {a["registrationId"]: a for a in attendance_records}
+    
     for reg in registrations:
         cls = await db.classes.find_one({"id": reg["classId"]}, {"_id": 0})
         reg["className"] = cls["name"] if cls else "Onbekend"
+        
+        # Add attendance info
+        att = attendance_map.get(reg["id"])
+        if att:
+            reg["attendanceStatus"] = "present" if att["isPresent"] else "absent"
+        elif reg["date"] < today and reg["status"] == "registered":
+            # Past date, no attendance recorded = potentially absent
+            reg["attendanceStatus"] = "unknown"
+        else:
+            reg["attendanceStatus"] = None
     
     return registrations
 
@@ -1431,6 +1478,7 @@ async def export_registrations(
 @api_router.get("/dashboard/stats")
 async def get_dashboard_stats(user: dict = Depends(get_current_user)):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
     
     # Today's moments
     today_moments = await db.study_moments.count_documents({"date": today, "isActive": True})
@@ -1443,11 +1491,26 @@ async def get_dashboard_stats(user: dict = Depends(get_current_user)):
     
     # User's registrations (if teacher)
     my_registrations = 0
+    my_absent_count = 0
     if user["role"] == UserRole.TEACHER:
         my_registrations = await db.registrations.count_documents({
             "teacherEmail": user["email"],
             "status": RegistrationStatus.REGISTERED
         })
+        
+        # Get my registrations that have been marked as absent
+        my_regs = await db.registrations.find({
+            "teacherEmail": user["email"],
+            "status": RegistrationStatus.REGISTERED,
+            "date": {"$lt": today}  # Past dates
+        }, {"_id": 0, "id": 1}).to_list(1000)
+        
+        my_reg_ids = [r["id"] for r in my_regs]
+        if my_reg_ids:
+            my_absent_count = await db.attendance.count_documents({
+                "registrationId": {"$in": my_reg_ids},
+                "isPresent": False
+            })
     
     # This week stats
     week_start = (datetime.now(timezone.utc) - timedelta(days=datetime.now(timezone.utc).weekday())).strftime("%Y-%m-%d")
@@ -1462,8 +1525,164 @@ async def get_dashboard_stats(user: dict = Depends(get_current_user)):
             "registrations": today_registrations
         },
         "myRegistrations": my_registrations,
-        "weekRegistrations": week_registrations
+        "myAbsentCount": my_absent_count,
+        "weekRegistrations": week_registrations,
+        "userRole": user["role"]
     }
+
+# ============ STUDENTS ROUTES ============
+
+@api_router.get("/students", response_model=List[StudentResponse])
+async def get_students(user: dict = Depends(get_current_user), search: Optional[str] = None, classId: Optional[str] = None):
+    query = {"isActive": True}
+    if classId:
+        query["classId"] = classId
+    
+    students = await db.students.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
+    
+    # Add class names
+    for student in students:
+        cls = await db.classes.find_one({"id": student["classId"]}, {"_id": 0})
+        student["className"] = cls["name"] if cls else "Onbekend"
+    
+    # Filter by search if provided
+    if search:
+        search_lower = search.lower()
+        students = [s for s in students if search_lower in s["name"].lower()]
+    
+    return students
+
+@api_router.get("/students/search")
+async def search_students(query: str, user: dict = Depends(get_current_user)):
+    """Search students by name for autocomplete"""
+    if len(query) < 2:
+        return []
+    
+    # Search with regex
+    search_regex = {"$regex": query, "$options": "i"}
+    students = await db.students.find(
+        {"name": search_regex, "isActive": True},
+        {"_id": 0}
+    ).limit(20).to_list(20)
+    
+    # Add class names
+    for student in students:
+        cls = await db.classes.find_one({"id": student["classId"]}, {"_id": 0})
+        student["className"] = cls["name"] if cls else "Onbekend"
+    
+    return students
+
+@api_router.post("/students", response_model=StudentResponse)
+async def create_student(data: StudentCreate, user: dict = Depends(require_admin)):
+    now = now_iso()
+    student_doc = {
+        "id": str(uuid.uuid4()),
+        "name": data.name,
+        "classId": data.classId,
+        "email": data.email,
+        "isActive": data.isActive,
+        "createdAt": now,
+        "updatedAt": now
+    }
+    await db.students.insert_one(student_doc)
+    
+    cls = await db.classes.find_one({"id": data.classId}, {"_id": 0})
+    result = {k: v for k, v in student_doc.items() if k != "_id"}
+    result["className"] = cls["name"] if cls else "Onbekend"
+    return result
+
+@api_router.post("/students/import")
+async def import_students(file: UploadFile = File(...), user: dict = Depends(require_superadmin)):
+    """Import students from Excel file (superadmin only)"""
+    if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
+        raise HTTPException(status_code=400, detail="Alleen Excel of CSV bestanden toegestaan")
+    
+    contents = await file.read()
+    try:
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(BytesIO(contents))
+        else:
+            df = pd.read_excel(BytesIO(contents))
+        
+        # Expect columns: name/naam, class/klas
+        name_col = None
+        class_col = None
+        
+        for col in ['name', 'naam', 'Name', 'Naam', 'leerling', 'Leerling', 'student', 'Student']:
+            if col in df.columns:
+                name_col = col
+                break
+        
+        for col in ['class', 'klas', 'Class', 'Klas', 'klasnaam', 'Klasnaam']:
+            if col in df.columns:
+                class_col = col
+                break
+        
+        if not name_col:
+            raise HTTPException(status_code=400, detail="Kolom 'naam' of 'leerling' niet gevonden")
+        if not class_col:
+            raise HTTPException(status_code=400, detail="Kolom 'klas' niet gevonden")
+        
+        now = now_iso()
+        imported = 0
+        skipped = 0
+        errors = []
+        
+        # Get all classes for lookup
+        classes = await db.classes.find({}, {"_id": 0}).to_list(1000)
+        class_map = {c["name"].lower(): c["id"] for c in classes}
+        
+        for idx, row in df.iterrows():
+            student_name = str(row[name_col]).strip()
+            class_name = str(row[class_col]).strip()
+            
+            if not student_name or student_name == 'nan':
+                continue
+            
+            # Find class
+            class_id = class_map.get(class_name.lower())
+            if not class_id:
+                errors.append(f"Klas '{class_name}' niet gevonden voor {student_name}")
+                skipped += 1
+                continue
+            
+            # Check if student already exists
+            existing = await db.students.find_one({
+                "name": {"$regex": f"^{student_name}$", "$options": "i"},
+                "classId": class_id
+            })
+            
+            if existing:
+                skipped += 1
+                continue
+            
+            student_doc = {
+                "id": str(uuid.uuid4()),
+                "name": student_name,
+                "classId": class_id,
+                "email": None,
+                "isActive": True,
+                "createdAt": now,
+                "updatedAt": now
+            }
+            await db.students.insert_one(student_doc)
+            imported += 1
+        
+        await log_audit(user["id"], "import", "students", "", {"imported": imported, "skipped": skipped})
+        return {"success": True, "imported": imported, "skipped": skipped, "errors": errors[:10]}
+    
+    except Exception as e:
+        logger.error(f"Import error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Fout bij importeren: {str(e)}")
+
+@api_router.delete("/students/{student_id}")
+async def delete_student(student_id: str, user: dict = Depends(require_admin)):
+    existing = await db.students.find_one({"id": student_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Leerling niet gevonden")
+    
+    await db.students.update_one({"id": student_id}, {"$set": {"isActive": False, "updatedAt": now_iso()}})
+    return {"success": True}
 
 # ============ SEED DATA ============
 

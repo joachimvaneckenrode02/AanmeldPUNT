@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useUsers } from '../../hooks/useApi';
+import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -29,17 +30,20 @@ import {
   Pencil,
   User,
   Shield,
-  UserCog
+  UserCog,
+  Crown
 } from 'lucide-react';
 
 const roleOptions = [
-  { value: 'teacher', label: 'Leerkracht', icon: User },
-  { value: 'educator', label: 'Opvoeder', icon: UserCog },
-  { value: 'admin', label: 'Admin', icon: Shield },
+  { value: 'teacher', label: 'Leerkracht', icon: User, description: 'Kan leerlingen aanmelden' },
+  { value: 'educator', label: 'Opvoeder', icon: UserCog, description: 'Kan aanwezigheden registreren' },
+  { value: 'admin', label: 'Admin', icon: Shield, description: 'Volledige toegang (behalve superadmin functies)' },
+  { value: 'superadmin', label: 'Superadmin', icon: Crown, description: 'Volledige toegang inclusief rollenbeheer' },
 ];
 
 export default function AdminUsers() {
   const { getUsers, updateUser, loading } = useUsers();
+  const { user: currentUser, isSuperAdmin } = useAuth();
   
   const [users, setUsers] = useState([]);
   const [pageLoading, setPageLoading] = useState(true);
@@ -92,6 +96,24 @@ export default function AdminUsers() {
     return <Icon className="w-4 h-4" />;
   };
 
+  const getRoleBadgeColor = (role) => {
+    switch (role) {
+      case 'superadmin':
+        return 'bg-purple-100 text-purple-700';
+      case 'admin':
+        return 'bg-blue-100 text-blue-700';
+      case 'educator':
+        return 'bg-amber-100 text-amber-700';
+      default:
+        return 'bg-slate-100 text-slate-700';
+    }
+  };
+
+  // Filter available roles based on current user
+  const availableRoles = isSuperAdmin() 
+    ? roleOptions 
+    : roleOptions.filter(r => r.value !== 'superadmin');
+
   if (pageLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -115,11 +137,20 @@ export default function AdminUsers() {
       {/* Info */}
       <Card className="border-0 shadow-sm bg-blue-50">
         <CardContent className="p-4">
-          <p className="text-sm text-blue-700">
-            <strong>Rollen:</strong> Leerkrachten kunnen leerlingen aanmelden. 
-            Opvoeders kunnen aanwezigheden registreren. 
-            Admins hebben volledige toegang tot alle functionaliteit.
-          </p>
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-blue-900">Rollenoverzicht:</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
+              {roleOptions.map((role) => (
+                <div key={role.value} className="flex items-start gap-2 text-sm">
+                  <role.icon className="w-4 h-4 text-blue-600 mt-0.5" />
+                  <div>
+                    <span className="font-medium text-blue-900">{role.label}:</span>
+                    <span className="text-blue-700 ml-1">{role.description}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -154,12 +185,17 @@ export default function AdminUsers() {
                             {user.name?.charAt(0).toUpperCase()}
                           </span>
                         </div>
-                        {user.name}
+                        <div>
+                          {user.name}
+                          {user.id === currentUser?.id && (
+                            <span className="ml-2 text-xs text-slate-400">(jij)</span>
+                          )}
+                        </div>
                       </div>
                     </TableCell>
                     <TableCell className="text-slate-500">{user.email}</TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1.5">
+                      <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${getRoleBadgeColor(user.role)}`}>
                         {getRoleIcon(user.role)}
                         <span>{getRoleLabel(user.role)}</span>
                       </div>
@@ -173,14 +209,17 @@ export default function AdminUsers() {
                       {formatDateShort(user.createdAt)}
                     </TableCell>
                     <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleOpenDialog(user)}
-                        data-testid={`edit-user-${user.id}`}
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </Button>
+                      {/* Only superadmin can edit users, and can't edit own superadmin role */}
+                      {isSuperAdmin() && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleOpenDialog(user)}
+                          data-testid={`edit-user-${user.id}`}
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))
@@ -219,11 +258,14 @@ export default function AdminUsers() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {roleOptions.map((role) => (
+                  {availableRoles.map((role) => (
                     <SelectItem key={role.value} value={role.value}>
                       <div className="flex items-center gap-2">
                         <role.icon className="w-4 h-4" />
-                        {role.label}
+                        <div>
+                          <span className="font-medium">{role.label}</span>
+                          <span className="text-slate-500 ml-2 text-xs">{role.description}</span>
+                        </div>
                       </div>
                     </SelectItem>
                   ))}

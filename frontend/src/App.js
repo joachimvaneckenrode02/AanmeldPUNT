@@ -19,6 +19,7 @@ import Attendance from './pages/Attendance';
 
 // Admin pages
 import AdminClasses from './pages/admin/Classes';
+import AdminStudents from './pages/admin/Students';
 import AdminStudyTypes from './pages/admin/StudyTypes';
 import AdminAvailability from './pages/admin/Availability';
 import AdminExclusionDates from './pages/admin/ExclusionDates';
@@ -49,6 +50,7 @@ function App() {
             
             {/* Admin routes */}
             <Route path="admin/klassen" element={<AdminClasses />} />
+            <Route path="admin/leerlingen" element={<AdminStudents />} />
             <Route path="admin/studiesoorten" element={<AdminStudyTypes />} />
             <Route path="admin/beschikbaarheid" element={<AdminAvailability />} />
             <Route path="admin/uitsluitingen" element={<AdminExclusionDates />} />

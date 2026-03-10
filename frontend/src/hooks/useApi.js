@@ -178,6 +178,25 @@ export const useUsers = () => {
   };
 };
 
+export const useStudents = () => {
+  const api = useApi();
+  
+  return {
+    ...api,
+    getStudents: (params) => api.get('/students', params),
+    searchStudents: (query) => api.get('/students/search', { query }),
+    createStudent: (data) => api.post('/students', data),
+    deleteStudent: (id) => api.del(`/students/${id}`),
+    importStudents: async (file) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return api.request('post', '/students/import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+    }
+  };
+};
+
 export const useReports = () => {
   const api = useApi();
   

@@ -19,11 +19,12 @@ import {
   Menu,
   X,
   ChevronDown,
-  GraduationCap
+  GraduationCap,
+  UsersRound
 } from 'lucide-react';
 
 const Sidebar = () => {
-  const { user, logout, isAdmin, canManageAttendance } = useAuth();
+  const { user, logout, isAdmin, isSuperAdmin, canManageAttendance } = useAuth();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [adminExpanded, setAdminExpanded] = useState(false);
@@ -44,6 +45,7 @@ const Sidebar = () => {
 
   const adminItems = [
     { to: '/admin/klassen', icon: GraduationCap, label: 'Klassen' },
+    { to: '/admin/leerlingen', icon: UsersRound, label: 'Leerlingen', superadminOnly: true },
     { to: '/admin/studiesoorten', icon: BookOpen, label: 'Studiesoorten' },
     { to: '/admin/beschikbaarheid', icon: CalendarDays, label: 'Beschikbaarheid' },
     { to: '/admin/uitsluitingen', icon: CalendarX, label: 'Uitsluitingsdata' },
@@ -118,9 +120,11 @@ const Sidebar = () => {
             
             {adminExpanded && (
               <div className="mt-1 ml-4 space-y-1 animate-slideUp">
-                {adminItems.map((item) => (
-                  <NavItem key={item.to} {...item} />
-                ))}
+                {adminItems
+                  .filter(item => !item.superadminOnly || isSuperAdmin())
+                  .map((item) => (
+                    <NavItem key={item.to} {...item} />
+                  ))}
               </div>
             )}
           </div>

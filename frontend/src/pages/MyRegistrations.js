@@ -4,6 +4,7 @@ import { useRegistrations } from '../hooks/useApi';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { 
   Table, 
   TableBody, 
@@ -31,7 +32,10 @@ import {
   ClipboardList,
   X,
   Calendar,
-  Clock
+  Clock,
+  XCircle,
+  CheckCircle2,
+  AlertTriangle
 } from 'lucide-react';
 
 export default function MyRegistrations() {
@@ -39,39 +43,56 @@ export default function MyRegistrations() {
 
   const [registrations, setRegistrations] = useState([]);
   const [filteredRegistrations, setFilteredRegistrations] = useState([]);
+  const [absentRegistrations, setAbsentRegistrations] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [pageLoading, setPageLoading] = useState(true);
   const [cancelDialog, setCancelDialog] = useState({ open: false, registration: null });
+  const [activeTab, setActiveTab] = useState('all');
 
   useEffect(() => {
     loadRegistrations();
   }, []);
 
   useEffect(() => {
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      setFilteredRegistrations(
-        registrations.filter(
-          r => r.studentName.toLowerCase().includes(query) ||
-               r.className?.toLowerCase().includes(query) ||
-               r.studyLabelSnapshot.toLowerCase().includes(query)
-        )
-      );
-    } else {
-      setFilteredRegistrations(registrations);
-    }
-  }, [searchQuery, registrations]);
+    filterRegistrations();
+  }, [searchQuery, registrations, activeTab]);
 
   const loadRegistrations = async () => {
     try {
       const data = await getMyRegistrations();
       setRegistrations(data);
-      setFilteredRegistrations(data);
+      
+      // Filter absent registrations
+      const absent = data.filter(r => r.attendanceStatus === 'absent');
+      setAbsentRegistrations(absent);
     } catch (error) {
       console.error('Error loading registrations:', error);
     } finally {
       setPageLoading(false);
     }
+  };
+
+  const filterRegistrations = () => {
+    let filtered = registrations;
+    
+    // Filter by tab
+    if (activeTab === 'absent') {
+      filtered = registrations.filter(r => r.attendanceStatus === 'absent');
+    } else if (activeTab === 'active') {
+      filtered = registrations.filter(r => r.status === 'registered');
+    }
+    
+    // Filter by search
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(
+        r => r.studentName.toLowerCase().includes(query) ||
+             r.className?.toLowerCase().includes(query) ||
+             r.studyLabelSnapshot.toLowerCase().includes(query)
+      );
+    }
+    
+    setFilteredRegistrations(filtered);
   };
 
   const handleCancel = async () => {
@@ -86,6 +107,26 @@ export default function MyRegistrations() {
     } finally {
       setCancelDialog({ open: false, registration: null });
     }
+  };
+
+  const getAttendanceBadge = (reg) => {
+    if (reg.attendanceStatus === 'absent') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-700">
+          <XCircle className="w-3 h-3" />
+          Afwezig
+        </span>
+      );
+    }
+    if (reg.attendanceStatus === 'present') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
+          <CheckCircle2 className="w-3 h-3" />
+          Aanwezig
+        </span>
+      );
+    }
+    return null;
   };
 
   if (pageLoading) {
@@ -114,18 +155,50 @@ export default function MyRegistrations() {
         </Button>
       </div>
 
-      {/* Search */}
+      {/* Absent Alert */}
+      {absentRegistrations.length > 0 && (
+        <Card className="border-0 shadow-sm bg-rose-50 border-l-4 border-l-rose-500">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="w-5 h-5 text-rose-600 flex-shrink-0" />
+              <div>
+                <p className="font-semibold text-rose-900">
+                  {absentRegistrations.length} leerling{absentRegistrations.length !== 1 ? 'en' : ''} afwezig gemeld
+                </p>
+                <p className="text-sm text-rose-700">
+                  Deze leerlingen zijn niet aanwezig geweest op hun ingeplande studie
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Tabs & Search */}
       <Card className="border-0 shadow-sm">
         <CardContent className="p-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <Input
-              placeholder="Zoeken op leerling, klas of studie..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-              data-testid="search-registrations"
-            />
+          <div className="flex flex-col md:flex-row md:items-center gap-4">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-shrink-0">
+              <TabsList>
+                <TabsTrigger value="all">Alles ({registrations.length})</TabsTrigger>
+                <TabsTrigger value="active">Actief ({registrations.filter(r => r.status === 'registered').length})</TabsTrigger>
+                {absentRegistrations.length > 0 && (
+                  <TabsTrigger value="absent" className="text-rose-600">
+                    Afwezig ({absentRegistrations.length})
+                  </TabsTrigger>
+                )}
+              </TabsList>
+            </Tabs>
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Input
+                placeholder="Zoeken op leerling, klas of studie..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+                data-testid="search-registrations"
+              />
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -159,11 +232,19 @@ export default function MyRegistrations() {
           {/* Mobile cards view */}
           <div className="md:hidden space-y-3">
             {filteredRegistrations.map((reg) => (
-              <Card key={reg.id} className="border-0 shadow-sm">
+              <Card 
+                key={reg.id} 
+                className={`border-0 shadow-sm ${
+                  reg.attendanceStatus === 'absent' ? 'bg-rose-50 border-l-4 border-l-rose-500' : ''
+                }`}
+              >
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between mb-3">
                     <div>
-                      <p className="font-medium text-slate-900">{reg.studentName}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-slate-900">{reg.studentName}</p>
+                        {getAttendanceBadge(reg)}
+                      </div>
                       <p className="text-sm text-slate-500">{reg.className}</p>
                     </div>
                     <span className={`status-badge ${getStatusBadgeClass(reg.status)}`}>
@@ -214,13 +295,17 @@ export default function MyRegistrations() {
                     <TableHead>Studie</TableHead>
                     <TableHead>Datum</TableHead>
                     <TableHead>Tijd</TableHead>
+                    <TableHead>Aanwezigheid</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="w-[100px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredRegistrations.map((reg) => (
-                    <TableRow key={reg.id}>
+                    <TableRow 
+                      key={reg.id} 
+                      className={reg.attendanceStatus === 'absent' ? 'bg-rose-50' : ''}
+                    >
                       <TableCell className="font-medium">{reg.studentName}</TableCell>
                       <TableCell>{reg.className}</TableCell>
                       <TableCell>
@@ -230,6 +315,11 @@ export default function MyRegistrations() {
                       </TableCell>
                       <TableCell>{formatDateShort(reg.date)}</TableCell>
                       <TableCell>{reg.startTime} - {reg.endTime}</TableCell>
+                      <TableCell>
+                        {getAttendanceBadge(reg) || (
+                          <span className="text-slate-400 text-sm">-</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <span className={`status-badge ${getStatusBadgeClass(reg.status)}`}>
                           {getStatusLabel(reg.status)}

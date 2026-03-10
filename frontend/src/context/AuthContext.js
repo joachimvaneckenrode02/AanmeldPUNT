@@ -63,10 +63,11 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
-  const isAdmin = () => user?.role === 'admin';
+  const isAdmin = () => user?.role === 'admin' || user?.role === 'superadmin';
+  const isSuperAdmin = () => user?.role === 'superadmin';
   const isEducator = () => user?.role === 'educator';
   const isTeacher = () => user?.role === 'teacher';
-  const canManageAttendance = () => user?.role === 'admin' || user?.role === 'educator';
+  const canManageAttendance = () => user?.role === 'admin' || user?.role === 'educator' || user?.role === 'superadmin';
 
   return (
     <AuthContext.Provider value={{
@@ -77,6 +78,7 @@ export const AuthProvider = ({ children }) => {
       register,
       logout,
       isAdmin,
+      isSuperAdmin,
       isEducator,
       isTeacher,
       canManageAttendance,

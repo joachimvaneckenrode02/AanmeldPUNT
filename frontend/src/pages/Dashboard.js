@@ -14,13 +14,14 @@ import {
   ChevronRight,
   Loader2,
   BookOpen,
-  Clock,
-  Sparkles
+  Sparkles,
+  AlertTriangle,
+  XCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function Dashboard() {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, isTeacher, canManageAttendance } = useAuth();
   const { getStats, seedData, loading: statsLoading } = useDashboard();
   const { getAvailableMoments } = useStudyMoments();
   const { getMyRegistrations } = useRegistrations();
@@ -28,6 +29,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [upcomingMoments, setUpcomingMoments] = useState([]);
   const [recentRegistrations, setRecentRegistrations] = useState([]);
+  const [absentRegistrations, setAbsentRegistrations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
 
@@ -46,6 +48,10 @@ export default function Dashboard() {
       setStats(statsData);
       setUpcomingMoments(momentsData.slice(0, 5));
       setRecentRegistrations(registrationsData.slice(0, 5));
+      
+      // Filter absent registrations
+      const absent = registrationsData.filter(r => r.attendanceStatus === 'absent');
+      setAbsentRegistrations(absent);
     } catch (error) {
       console.error('Error loading dashboard:', error);
     } finally {
@@ -73,6 +79,9 @@ export default function Dashboard() {
       </div>
     );
   }
+
+  const showEducatorStats = canManageAttendance() || isAdmin();
+  const showTeacherContent = isTeacher() || isAdmin();
 
   return (
     <div className="space-y-8 animate-fadeIn" data-testid="dashboard">
@@ -111,64 +120,141 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 stagger-children">
-        <Card className="border-0 shadow-sm card-hover">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-slate-500 mb-1">Studies vandaag</p>
-                <p className="text-3xl font-bold text-slate-900">{stats?.today?.moments || 0}</p>
-              </div>
-              <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center">
-                <Calendar className="w-6 h-6 text-blue-600" />
+      {/* Absent Alert for Teachers */}
+      {showTeacherContent && absentRegistrations.length > 0 && (
+        <Card className="border-0 shadow-sm bg-rose-50 border-l-4 border-l-rose-500">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-rose-600 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="font-semibold text-rose-900">
+                  {absentRegistrations.length} leerling{absentRegistrations.length !== 1 ? 'en' : ''} afwezig gemeld
+                </p>
+                <p className="text-sm text-rose-700 mt-1">
+                  De volgende leerlingen zijn niet aanwezig geweest op hun ingeplande studie:
+                </p>
+                <div className="mt-3 space-y-2">
+                  {absentRegistrations.slice(0, 3).map((reg) => (
+                    <div key={reg.id} className="flex items-center justify-between bg-white/50 p-2 rounded-lg">
+                      <div>
+                        <span className="font-medium text-rose-900">{reg.studentName}</span>
+                        <span className="text-rose-700 ml-2">({reg.className})</span>
+                      </div>
+                      <div className="text-sm text-rose-600">
+                        {reg.studyLabelSnapshot} - {formatDateShort(reg.date)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {absentRegistrations.length > 3 && (
+                  <Button variant="link" className="mt-2 text-rose-700 p-0" asChild>
+                    <Link to="/mijn-aanmeldingen">
+                      Alle {absentRegistrations.length} afwezigheden bekijken
+                      <ChevronRight className="w-4 h-4 ml-1" />
+                    </Link>
+                  </Button>
+                )}
               </div>
             </div>
           </CardContent>
         </Card>
+      )}
 
-        <Card className="border-0 shadow-sm card-hover">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-slate-500 mb-1">Aanmeldingen vandaag</p>
-                <p className="text-3xl font-bold text-slate-900">{stats?.today?.registrations || 0}</p>
+      {/* Stats Grid - Different for educators/admins vs teachers */}
+      {showEducatorStats && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 stagger-children">
+          <Card className="border-0 shadow-sm card-hover">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-500 mb-1">Studies vandaag</p>
+                  <p className="text-3xl font-bold text-slate-900">{stats?.today?.moments || 0}</p>
+                </div>
+                <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center">
+                  <Calendar className="w-6 h-6 text-blue-600" />
+                </div>
               </div>
-              <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center">
-                <Users className="w-6 h-6 text-emerald-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
 
-        <Card className="border-0 shadow-sm card-hover">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-slate-500 mb-1">Mijn aanmeldingen</p>
-                <p className="text-3xl font-bold text-slate-900">{stats?.myRegistrations || 0}</p>
+          <Card className="border-0 shadow-sm card-hover">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-500 mb-1">Aanmeldingen vandaag</p>
+                  <p className="text-3xl font-bold text-slate-900">{stats?.today?.registrations || 0}</p>
+                </div>
+                <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center">
+                  <Users className="w-6 h-6 text-emerald-600" />
+                </div>
               </div>
-              <div className="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center">
-                <ClipboardList className="w-6 h-6 text-purple-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
 
-        <Card className="border-0 shadow-sm card-hover">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-slate-500 mb-1">Deze week</p>
-                <p className="text-3xl font-bold text-slate-900">{stats?.weekRegistrations || 0}</p>
+          <Card className="border-0 shadow-sm card-hover">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-500 mb-1">Mijn aanmeldingen</p>
+                  <p className="text-3xl font-bold text-slate-900">{stats?.myRegistrations || 0}</p>
+                </div>
+                <div className="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center">
+                  <ClipboardList className="w-6 h-6 text-purple-600" />
+                </div>
               </div>
-              <div className="w-12 h-12 rounded-xl bg-orange-100 flex items-center justify-center">
-                <TrendingUp className="w-6 h-6 text-orange-600" />
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-sm card-hover">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-500 mb-1">Deze week</p>
+                  <p className="text-3xl font-bold text-slate-900">{stats?.weekRegistrations || 0}</p>
+                </div>
+                <div className="w-12 h-12 rounded-xl bg-orange-100 flex items-center justify-center">
+                  <TrendingUp className="w-6 h-6 text-orange-600" />
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Teacher-only compact stat */}
+      {isTeacher() && !isAdmin() && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Card className="border-0 shadow-sm card-hover">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-500 mb-1">Mijn actieve aanmeldingen</p>
+                  <p className="text-3xl font-bold text-slate-900">{stats?.myRegistrations || 0}</p>
+                </div>
+                <div className="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center">
+                  <ClipboardList className="w-6 h-6 text-purple-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {(stats?.myAbsentCount || 0) > 0 && (
+            <Card className="border-0 shadow-sm card-hover bg-rose-50">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-rose-600 mb-1">Afwezigheden</p>
+                    <p className="text-3xl font-bold text-rose-700">{stats?.myAbsentCount || 0}</p>
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-rose-100 flex items-center justify-center">
+                    <XCircle className="w-6 h-6 text-rose-600" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
 
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -261,12 +347,24 @@ export default function Dashboard() {
                 {recentRegistrations.map((reg) => (
                   <div
                     key={reg.id}
-                    className="flex items-center justify-between p-3 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors"
+                    className={`flex items-center justify-between p-3 rounded-lg transition-colors ${
+                      reg.attendanceStatus === 'absent' 
+                        ? 'bg-rose-50 border border-rose-200 hover:bg-rose-100' 
+                        : 'bg-slate-50 hover:bg-slate-100'
+                    }`}
                   >
                     <div>
-                      <p className="text-sm font-medium text-slate-900">
-                        {reg.studentName}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-slate-900">
+                          {reg.studentName}
+                        </p>
+                        {reg.attendanceStatus === 'absent' && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-700">
+                            <XCircle className="w-3 h-3" />
+                            Afwezig
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-xs text-slate-500">{reg.className}</span>
                         <span className="text-xs text-slate-300">|</span>

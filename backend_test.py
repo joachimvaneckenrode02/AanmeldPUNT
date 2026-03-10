@@ -65,19 +65,25 @@ class SchoolRegistrationAPITester:
         """Test authentication endpoints"""
         print("\n🔐 Testing Authentication...")
         
-        # Test login with provided credentials
+        # Test superadmin login first
         success, response = self.run_test(
-            "Login with admin credentials",
+            "Login with superadmin credentials",
             "POST",
             "auth/login",
             200,
-            data={"email": "admin@school.be", "password": "admin123"}
+            data={"email": "joachim.vaneckenrode@rhizo.be", "password": "superadmin123"}
         )
         
         if success and 'token' in response:
             self.token = response['token']
             self.user = response['user']
-            self.log_test("Login with admin credentials", True, response)
+            self.log_test("Login with superadmin credentials", True, response)
+            
+            # Verify superadmin role
+            if self.user.get('role') == 'superadmin':
+                self.log_test("Superadmin role verification", True)
+            else:
+                self.log_test("Superadmin role verification", False, None, f"Expected superadmin, got {self.user.get('role')}")
             
             # Test token validation
             success, user_response = self.run_test(
@@ -90,8 +96,25 @@ class SchoolRegistrationAPITester:
             
             return True
         else:
-            self.log_test("Login with admin credentials", False, None, response)
-            return False
+            self.log_test("Login with superadmin credentials", False, None, response)
+            
+            # Fallback to admin login
+            success, response = self.run_test(
+                "Login with admin credentials",
+                "POST",
+                "auth/login",
+                200,
+                data={"email": "admin@school.be", "password": "admin123"}
+            )
+            
+            if success and 'token' in response:
+                self.token = response['token']
+                self.user = response['user']
+                self.log_test("Login with admin credentials", True, response)
+                return True
+            else:
+                self.log_test("Login with admin credentials", False, None, response)
+                return False
 
     def test_seed_data(self):
         """Test seed data creation"""
@@ -406,6 +429,162 @@ class SchoolRegistrationAPITester:
         
         return success
 
+    def test_students(self):
+        """Test students functionality"""
+        print("\n👥 Testing Students...")
+        
+        # Get students (should work for any authenticated user)
+        success, response = self.run_test(
+            "Get students list",
+            "GET",
+            "students",
+            200
+        )
+        self.log_test("Get students list", success, response)
+        
+        # Test student search
+        success, search_response = self.run_test(
+            "Search students",
+            "GET",
+            "students/search?query=test",
+            200
+        )
+        self.log_test("Search students", success, search_response)
+        
+        # If superadmin, test creating a student
+        if self.user.get('role') == 'superadmin' and self.test_data.get('classes'):
+            class_id = self.test_data['classes'][0]['id']
+            
+            student_data = {
+                "name": "Test Student for Autocomplete",
+                "classId": class_id,
+                "email": "teststudent@school.be",
+                "isActive": True
+            }
+            
+            success, student_response = self.run_test(
+                "Create student (superadmin)",
+                "POST",
+                "students",
+                200,
+                data=student_data
+            )
+            self.log_test("Create student (superadmin)", success, student_response)
+            
+            if success:
+                self.test_data['created_student'] = student_response
+        
+        return True
+
+    def test_users_management(self):
+        """Test users management (superadmin only)"""
+        print("\n👤 Testing Users Management...")
+        
+        if self.user.get('role') != 'superadmin':
+            print("   Skipping - requires superadmin role")
+            return True
+        
+        # Get all users
+        success, response = self.run_test(
+            "Get all users (superadmin)",
+            "GET",
+            "users",
+            200
+        )
+        self.log_test("Get all users (superadmin)", success, response)
+        
+        if success and len(response) > 0:
+            # Find a non-superadmin user to test role change
+            test_user = None
+            for user in response:
+                if user.get('role') != 'superadmin':
+                    test_user = user
+                    break
+            
+            if test_user:
+                # Test updating user role
+                update_data = {
+                    "name": test_user['name'],
+                    "role": "educator",  # Change to educator
+                    "isActive": test_user.get('isActive', True)
+                }
+                
+                success, update_response = self.run_test(
+                    "Update user role (superadmin)",
+                    "PUT",
+                    f"users/{test_user['id']}",
+                    200,
+                    data=update_data
+                )
+                self.log_test("Update user role (superadmin)", success, update_response)
+        
+        return True
+
+    def test_teacher_login(self):
+        """Test teacher login and dashboard differences"""
+        print("\n👨‍🏫 Testing Teacher Login...")
+        
+        # First try to register a teacher user if it doesn't exist
+        register_success, register_response = self.run_test(
+            "Register teacher user",
+            "POST",
+            "auth/register",
+            200,
+            data={
+                "name": "Test Teacher",
+                "email": "testteacher@school.be",
+                "password": "teacher123",
+                "confirmPassword": "teacher123"
+            }
+        )
+        
+        # Try login with created teacher or existing teacher
+        teacher_email = "testteacher@school.be" if register_success else "teacher1773165067@school.be"
+        success, response = self.run_test(
+            "Login with teacher credentials", 
+            "POST",
+            "auth/login",
+            200,
+            data={"email": teacher_email, "password": "teacher123"}
+        )
+        
+        if success and 'token' in response:
+            # Save current superadmin token
+            old_token = self.token
+            old_user = self.user
+            
+            # Switch to teacher
+            self.token = response['token']
+            self.user = response['user']
+            self.log_test("Login with teacher credentials", True, response)
+            
+            # Test dashboard stats as teacher (should be different)
+            success, stats_response = self.run_test(
+                "Get dashboard stats (teacher)",
+                "GET", 
+                "dashboard/stats",
+                200
+            )
+            self.log_test("Get dashboard stats (teacher)", success, stats_response)
+            
+            # Test that teacher cannot access admin endpoints
+            success, admin_response = self.run_test(
+                "Access users endpoint (should fail for teacher)",
+                "GET",
+                "users",
+                403  # Should be forbidden
+            )
+            self.log_test("Access users endpoint (should fail for teacher)", success, admin_response)
+            
+            # Restore superadmin token for remaining tests
+            self.token = old_token
+            self.user = old_user
+            
+            return True
+        else:
+            self.log_test("Login with teacher credentials", False, None, response)
+            return False
+
     def run_all_tests(self):
         """Run all backend API tests"""
         print("🚀 Starting School Registration System Backend API Tests")
@@ -421,10 +600,13 @@ class SchoolRegistrationAPITester:
             self.test_seed_data,
             self.test_classes,
             self.test_study_types,
+            self.test_students,
+            self.test_users_management,
             self.test_availability_rules,
             self.test_study_moments_generation,
             self.test_registrations,
             self.test_attendance,
+            self.test_teacher_login,
             self.test_dashboard_stats,
             self.test_reports
         ]

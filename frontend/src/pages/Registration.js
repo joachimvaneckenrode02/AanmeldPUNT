@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useStudyTypes, useStudyMoments, useClasses, useRegistrations } from '../hooks/useApi';
+import { useStudyTypes, useStudyMoments, useClasses, useRegistrations, useStudents } from '../hooks/useApi';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -16,7 +16,8 @@ import {
   Calendar, 
   Clock, 
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Search
 } from 'lucide-react';
 
 export default function Registration() {
@@ -25,6 +26,7 @@ export default function Registration() {
   const { getAvailableMoments, getMoment } = useStudyMoments();
   const { getClasses } = useClasses();
   const { createRegistration, loading: submitting } = useRegistrations();
+  const { searchStudents } = useStudents();
 
   const [studyTypes, setStudyTypes] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -32,6 +34,13 @@ export default function Registration() {
   const [selectedMomentDetails, setSelectedMomentDetails] = useState(null);
   const [loading, setLoading] = useState(true);
   const [success, setSuccess] = useState(false);
+
+  // Student autocomplete
+  const [studentSuggestions, setStudentSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const studentInputRef = useRef(null);
+  const suggestionsRef = useRef(null);
 
   const [formData, setFormData] = useState({
     teacherName: user?.name || '',
@@ -74,6 +83,22 @@ export default function Registration() {
     }
   }, [formData.studyMomentId]);
 
+  // Click outside to close suggestions
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        suggestionsRef.current && 
+        !suggestionsRef.current.contains(event.target) &&
+        studentInputRef.current &&
+        !studentInputRef.current.contains(event.target)
+      ) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const loadInitialData = async () => {
     try {
       const [typesData, classesData] = await Promise.all([
@@ -105,6 +130,37 @@ export default function Registration() {
     } catch (error) {
       console.error('Error loading moment details:', error);
     }
+  };
+
+  const handleStudentSearch = async (query) => {
+    handleChange('studentName', query);
+    
+    if (query.length < 2) {
+      setStudentSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    setSearchLoading(true);
+    try {
+      const results = await searchStudents(query);
+      setStudentSuggestions(results);
+      setShowSuggestions(results.length > 0);
+    } catch (error) {
+      console.error('Error searching students:', error);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const handleSelectStudent = (student) => {
+    setFormData(prev => ({
+      ...prev,
+      studentName: student.name,
+      classId: student.classId
+    }));
+    setShowSuggestions(false);
+    setStudentSuggestions([]);
   };
 
   const handleSubmit = async (e) => {
@@ -203,18 +259,55 @@ export default function Registration() {
                   </div>
                 </div>
 
-                {/* Student info */}
+                {/* Student info with autocomplete */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
+                  <div className="space-y-2 relative">
                     <Label htmlFor="studentName">Naam leerling *</Label>
-                    <Input
-                      id="studentName"
-                      placeholder="Voornaam Achternaam"
-                      value={formData.studentName}
-                      onChange={(e) => handleChange('studentName', e.target.value)}
-                      required
-                      data-testid="student-name-input"
-                    />
+                    <div className="relative">
+                      <Input
+                        id="studentName"
+                        ref={studentInputRef}
+                        placeholder="Begin te typen..."
+                        value={formData.studentName}
+                        onChange={(e) => handleStudentSearch(e.target.value)}
+                        onFocus={() => {
+                          if (studentSuggestions.length > 0) {
+                            setShowSuggestions(true);
+                          }
+                        }}
+                        required
+                        autoComplete="off"
+                        data-testid="student-name-input"
+                      />
+                      {searchLoading && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                          <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Autocomplete dropdown */}
+                    {showSuggestions && studentSuggestions.length > 0 && (
+                      <div
+                        ref={suggestionsRef}
+                        className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto"
+                      >
+                        {studentSuggestions.map((student) => (
+                          <button
+                            key={student.id}
+                            type="button"
+                            className="w-full px-4 py-3 text-left hover:bg-slate-50 flex items-center justify-between border-b border-slate-100 last:border-0"
+                            onClick={() => handleSelectStudent(student)}
+                          >
+                            <div>
+                              <p className="font-medium text-slate-900">{student.name}</p>
+                              <p className="text-sm text-slate-500">{student.className}</p>
+                            </div>
+                            <Search className="w-4 h-4 text-slate-300" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="classId">Klas *</Label>
