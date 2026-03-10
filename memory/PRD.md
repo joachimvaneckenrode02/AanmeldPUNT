@@ -1,62 +1,58 @@
-# StudieReg - School Study Registration System
+# StudieReg - PRD (Product Requirements Document)
 
-## Original Problem Statement
-Build a complete, production-ready web application for Flemish schools where teachers can register students for study sessions (Inhaalstudie, Werkstudie, Strafstudie, Leerlabo with subtypes, Begeleide studie). Three user roles with role-based access control.
+## Oorspronkelijke Opdracht
+Webapp voor scholen waarmee leerkrachten leerlingen kunnen aanmelden voor studies en begeleidingsmomenten op school.
 
-## Architecture
-- **Frontend**: React with Shadcn/UI components, TailwindCSS
-- **Backend**: FastAPI with MongoDB
-- **Authentication**: JWT-based with bcrypt password hashing
-- **Design**: "Academic Clarity" theme - Academic Slate (#2E5C5A), Warm Paper, Burnt Clay accent
+## Gebruikers & Rollen
+- **Leerkracht:** Aanmelden, studies bekijken, capaciteit zien
+- **Admin:** Alles beheren (klassen, studies, regels, momenten, e-mailtemplates, rapporten)
+- **Opvoeder:** Aanwezigheden registreren, rapportage bekijken
+- **Superadmin:** Beheert admins, kan leerlingenlijsten uploaden
 
-## User Personas
-1. **Leerkracht (Teacher)**: Registers students for study sessions, views own registrations
-2. **Admin**: Full access - manages classes, study types, availability rules, users, reports
-3. **Opvoeder (Educator)**: Tracks attendance for study sessions
+## Tech Stack
+- Frontend: React + TailwindCSS + Shadcn/UI
+- Backend: FastAPI (Python)
+- Database: MongoDB
+- Auth: JWT
 
-## Core Requirements (Static)
-- Dutch language interface
-- Mobile-responsive design
-- Role-based access control
-- Study registration with capacity validation
-- Duplicate registration prevention
-- Attendance tracking per study moment
-- Email templates prepared (mocked)
-- Excel import for classes
-- Reporting and CSV export
+## Gerealiseerde Features
 
-## What's Been Implemented
-**2026-03-10: MVP Complete**
-- Full authentication system (register/login)
-- Dashboard with stats
-- Student registration form with validations
-- Available studies overview with capacity
-- My registrations with cancel option
-- Attendance module with present/absent buttons
-- Admin modules: Classes, Study Types, Availability Rules, Exclusion Dates, Email Templates, Registrations, Reports, Users
-- Seed data functionality
-- Study moments generation from rules
+### V1.0 - Kern (Voltooid)
+- JWT authenticatie met 4 rollen
+- CRUD voor klassen, studietypes, beschikbaarheidsregels, studiemomenten
+- Registratieflow voor leerkrachten met student-autocomplete
+- Aanwezigheidsmodule voor opvoeders
+- Rolgebaseerde dashboards en navigatie
+- Studentenbeheer met Excel-import + Smartschool-import
+- Visuele markering afwezige leerlingen
 
-## Prioritized Backlog
-### P0 (Critical)
-- ✅ Authentication & roles
-- ✅ Registration flow
-- ✅ Availability/capacity logic
-- ✅ Admin module
+### V1.1 - Verbeteringen (Feb 2026)
+- **Standaardtijden 16:00-17:00:** Alle nieuwe studietypes en regels krijgen standaard 16:00-17:00
+- **Verwijderen vs. Deactiveren:** Vuilnisbak = echt verwijderen (met waarschuwing), oog-icoon = zichtbaarheid toggle. Geldt voor klassen, leerlingen, studietypes, beschikbaarheidsregels, studiemomenten
+- **Uitsluitingsdata met specifieke studies:** Per datum specifieke studietypes uitsluiten, of alle studies bij geen selectie
+- **Rapportagemodule uitgebreid:** 3 tabs (Overzicht, Per leerling, Per klas) met aanwezigheidspercentages, progress bars, CSV export (aanmeldingen + aanwezigheid). Toegankelijk voor opvoeders en admins
 
-### P1 (Important)
-- ✅ Attendance module
-- ✅ Reporting
-- ⬜ Email service integration (prepared, needs provider)
+## Backlog
 
-### P2 (Nice to have)
-- ⬜ Scheduled absence email job (cron)
-- ⬜ Smartschool API integration
-- ⬜ Multi-tenant support
-- ⬜ Parent communication module
+### P0
+- Automatische afwezigheidsmails (cron job) - dagelijks leerkrachten mailen over afwezige leerlingen
 
-## Next Tasks
-1. Configure email provider (SendGrid/Resend) when ready
-2. Implement scheduled job for absence notifications
-3. Add Smartschool integration
-4. Implement advanced reporting with charts
+### P1
+- E-mailverzending activeren (momenteel GEMOCKT) - echte service (Resend/SendGrid)
+
+### P2
+- Audit Logging implementeren (model bestaat, schrijflogica ontbreekt)
+- Koppelingen met externe systemen (Smartschool API, Google Workspace)
+
+## Architectuur
+```
+/app/backend/server.py    - Alle API endpoints
+/app/frontend/src/
+  hooks/useApi.js          - API hooks
+  pages/admin/*.js         - Admin pagina's
+  components/layout/*.js   - Sidebar, Layout
+  context/AuthContext.js   - Auth context
+```
+
+## Credentials
+- Superadmin: joachim.vaneckenrode@rhizo.be / superadmin123
