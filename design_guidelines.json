@@ -1,0 +1,192 @@
+{
+  "project_name": "School Study Registration System",
+  "version": "1.0.0",
+  "last_updated": "2024-05-22",
+  "persona": "E1: The Anti-AI Designer",
+  "theme_strategy": {
+    "name": "Academic Clarity",
+    "description": "A fusion of Swiss International Style (clarity, grids) and Organic Warmth (human-centric, approachable). Avoids the sterile 'Enterprise SaaS' look by using warm neutrals and deep academic tones.",
+    "mode": "light",
+    "emotional_archetype": "Organic & Earthy (Trust, Growth, Calm)"
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Outfit, sans-serif",
+      "body": "Inter, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "scale": {
+      "h1": "text-4xl md:text-5xl font-bold tracking-tight",
+      "h2": "text-3xl md:text-4xl font-semibold tracking-tight",
+      "h3": "text-2xl font-semibold tracking-normal",
+      "h4": "text-xl font-medium tracking-normal",
+      "body_large": "text-lg leading-relaxed",
+      "body_default": "text-base leading-relaxed",
+      "caption": "text-sm text-muted-foreground",
+      "label": "text-xs font-bold uppercase tracking-widest text-muted-foreground"
+    },
+    "weights": {
+      "light": 300,
+      "normal": 400,
+      "medium": 500,
+      "semibold": 600,
+      "bold": 700
+    }
+  },
+  "colors": {
+    "palette": {
+      "primary": {
+        "name": "Academic Slate",
+        "hex": "#2E5C5A",
+        "tailwind": "bg-[#2E5C5A] text-white hover:bg-[#244A48]"
+      },
+      "secondary": {
+        "name": "Warm Paper",
+        "hex": "#F9F9F7",
+        "tailwind": "bg-[#F9F9F7]"
+      },
+      "accent": {
+        "name": "Burnt Clay",
+        "hex": "#D66D4F",
+        "tailwind": "text-[#D66D4F] border-[#D66D4F]"
+      },
+      "status": {
+        "success": {
+          "bg": "bg-emerald-100",
+          "text": "text-emerald-700",
+          "dot": "bg-emerald-500"
+        },
+        "warning": {
+          "bg": "bg-amber-100",
+          "text": "text-amber-700",
+          "dot": "bg-amber-500"
+        },
+        "error": {
+          "bg": "bg-rose-100",
+          "text": "text-rose-700",
+          "dot": "bg-rose-500"
+        },
+        "neutral": {
+          "bg": "bg-slate-100",
+          "text": "text-slate-600",
+          "dot": "bg-slate-400"
+        }
+      }
+    },
+    "gradients": {
+      "dashboard_hero": "bg-gradient-to-br from-[#2E5C5A] to-[#1A3C3A]",
+      "subtle_glow": "bg-gradient-to-r from-transparent via-[#D66D4F]/10 to-transparent"
+    }
+  },
+  "layout": {
+    "container": {
+      "default": "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8",
+      "narrow": "max-w-3xl mx-auto px-4"
+    },
+    "spacing": {
+      "section_gap": "gap-8 md:gap-12",
+      "card_padding": "p-6 md:p-8",
+      "table_cell": "p-4"
+    },
+    "border_radius": {
+      "default": "rounded-lg",
+      "card": "rounded-xl",
+      "button": "rounded-md"
+    },
+    "grid_system": {
+      "dashboard": "grid grid-cols-1 md:grid-cols-12 gap-6",
+      "form": "grid grid-cols-1 md:grid-cols-2 gap-6"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#2E5C5A] text-white hover:bg-[#244A48] shadow-sm transition-all duration-200 active:scale-95",
+      "secondary": "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900 shadow-sm",
+      "ghost": "hover:bg-slate-100 text-slate-600 hover:text-slate-900",
+      "destructive": "bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 hover:border-rose-300"
+    },
+    "cards": {
+      "default": "bg-white border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300",
+      "interactive": "group relative overflow-hidden bg-white border border-slate-200 shadow-sm hover:border-[#2E5C5A]/50 transition-colors duration-300 cursor-pointer"
+    },
+    "inputs": {
+      "default": "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+      "search": "pl-10 bg-slate-50 border-slate-200 focus:bg-white transition-colors"
+    },
+    "badges": {
+      "base": "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+      "outline": "text-foreground"
+    }
+  },
+  "visual_enhancers": {
+    "textures": {
+      "noise": "bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPgo8cmVjdCB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjZmZmIi8+CjxyZWN0IHdpZHRoPSIxIiBoZWlnaHQ9IjEiIGZpbGw9IiNjY2MiLz4KPC9zdmc+')] opacity-5"
+    },
+    "shadows": {
+      "soft": "shadow-[0_2px_8px_rgba(0,0,0,0.04)]",
+      "float": "shadow-[0_8px_24px_rgba(0,0,0,0.08)]"
+    },
+    "glassmorphism": {
+      "header": "bg-white/80 backdrop-blur-md border-b border-slate-200/50 supports-[backdrop-filter]:bg-white/60"
+    }
+  },
+  "motion": {
+    "transitions": {
+      "default": "transition-all duration-200 ease-in-out",
+      "slow": "transition-all duration-500 ease-out"
+    },
+    "animations": {
+      "fade_in": "animate-in fade-in duration-500",
+      "slide_up": "animate-in slide-in-from-bottom-4 fade-in duration-500",
+      "scale_in": "animate-in zoom-in-95 fade-in duration-300"
+    }
+  },
+  "images": {
+    "login_hero": {
+      "url": "https://images.unsplash.com/photo-1758901193538-3986b3e17f0b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzN8MHwxfHNlYXJjaHw0fHxtb2Rlcm4lMjBzY2hvb2wlMjBsaWJyYXJ5JTIwc3R1ZGVudHMlMjBzdHVkeWluZ3xlbnwwfHx8fDE3NzMxNjM4NDV8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Modern school library interior",
+      "usage": "Split screen hero image for login/register pages. Apply a subtle dark overlay (bg-black/20) to ensure text readability if overlaid."
+    },
+    "empty_state_study": {
+      "url": "https://images.unsplash.com/photo-1767102060241-130cb9260718?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzN8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBzY2hvb2wlMjBsaWJyYXJ5JTIwc3R1ZGVudHMlMjBzdHVkeWluZ3xlbnwwfHx8fDE3NzMxNjM4NDV8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Students studying at tables",
+      "usage": "Use for empty states in 'My Registrations' or 'Study Moments' when no data is present."
+    },
+    "classroom_context": {
+      "url": "https://images.unsplash.com/photo-1766867257943-0665537fb2dd?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwxfHx0ZWFjaGVyJTIwdXNpbmclMjB0YWJsZXQlMjBpbiUyMGNsYXNzcm9vbXxlbnwwfHx8fDE3NzMxNjM4NDZ8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Teacher context",
+      "usage": "Use for teacher-specific dashboard sections or promotional blocks."
+    }
+  },
+  "accessibility": {
+    "contrast_check": "Ensure all text meets WCAG AA standards. Use 'text-slate-900' on white, 'text-white' on primary background.",
+    "interactive_elements": "All buttons and links must have a focus ring (ring-2 ring-offset-2).",
+    "reduced_motion": "Respect 'prefers-reduced-motion'. Use CSS variables for animation durations that can be set to 0."
+  },
+  "universal_guidelines": [
+    "You tend to converge toward generic outputs. Avoid 'AI slop' aesthetic.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts. Use grids and diagonals.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur).",
+    "You MUST NOT apply universal transition (e.g., transition: all).",
+    "You MUST NOT center align the app container (.App { text-align: center; }).",
+    "Always use modern button styles (pill-shaped or sharp) with interaction animations.",
+    "NEVER use AI assistant Emoji characters (🤖, 🧠, etc.) for icons.",
+    "Every interaction needs micro-animations - hover states, transitions.",
+    "Use 2-3x more spacing than feels comfortable.",
+    "Subtle grain textures and noise overlays separate good from extraordinary.",
+    "Components MUST use named exports (export const ComponentName = ...).",
+    "Pages MUST use default exports (export default function PageName() {...}).",
+    "Use 'sonner' for toasts.",
+    "All interactive and key informational elements MUST include a 'data-testid' attribute."
+  ],
+  "instructions_to_main_agent": [
+    "1. Setup the Theme: Update 'tailwind.config.js' with the 'colors' and 'border_radius' defined above.",
+    "2. Global Styles: Update 'index.css' to include the base font families (Outfit for headings, Inter for body). Import fonts from Google Fonts via simple CSS import or link tag in index.html.",
+    "3. Layout Implementation: Build the 'DashboardLayout' component using the 'Sidebar' pattern. Use the 'Academic Slate' color for the sidebar background.",
+    "4. Component Customization: Customize Shadcn components to match the 'Warm Paper' and 'Academic Slate' aesthetic. Remove default 'zinc' feel.",
+    "5. Page Construction: Build pages following the 'Bento' grid layout for dashboards. Use the provided image URLs for login/empty states.",
+    "6. Testing Preparation: Add 'data-testid' to every button, input, and card."
+  ]
+}
