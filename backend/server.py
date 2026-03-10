@@ -105,7 +105,7 @@ class StudyTypeBase(BaseModel):
     key: str
     isActive: bool = True
     defaultCapacity: int = 20
-    defaultStartTime: str = "15:30"
+    defaultStartTime: str = "16:00"
     defaultEndTime: str = "17:00"
     colorLabel: Optional[str] = None
 
@@ -160,6 +160,7 @@ class AvailabilityRuleResponse(BaseModel):
 class ExclusionDateBase(BaseModel):
     date: str  # ISO date
     reason: str
+    excludedStudyTypeIds: Optional[List[str]] = None  # None/empty = all types excluded
     isActive: bool = True
 
 class ExclusionDateCreate(ExclusionDateBase):
@@ -170,6 +171,7 @@ class ExclusionDateResponse(BaseModel):
     id: str
     date: str
     reason: str
+    excludedStudyTypeIds: Optional[List[str]] = None
     isActive: bool
     createdAt: str
     updatedAt: str
@@ -521,10 +523,23 @@ async def delete_class(class_id: str, user: dict = Depends(require_admin)):
     if not existing:
         raise HTTPException(status_code=404, detail="Klas niet gevonden")
     
-    # Soft delete - just deactivate
-    await db.classes.update_one({"id": class_id}, {"$set": {"isActive": False, "updatedAt": now_iso()}})
+    # Hard delete
+    await db.classes.delete_one({"id": class_id})
     await log_audit(user["id"], "delete", "class", class_id)
     return {"success": True}
+
+@api_router.patch("/classes/{class_id}/toggle-active")
+async def toggle_class_active(class_id: str, user: dict = Depends(require_admin)):
+    existing = await db.classes.find_one({"id": class_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Klas niet gevonden")
+    
+    new_active = not existing.get("isActive", True)
+    await db.classes.update_one({"id": class_id}, {"$set": {"isActive": new_active, "updatedAt": now_iso()}})
+    await log_audit(user["id"], "toggle_active", "class", class_id, {"isActive": new_active})
+    
+    updated = await db.classes.find_one({"id": class_id}, {"_id": 0})
+    return updated
 
 @api_router.post("/classes/import")
 async def import_classes(file: UploadFile = File(...), user: dict = Depends(require_admin)):
@@ -626,9 +641,23 @@ async def delete_study_type(type_id: str, user: dict = Depends(require_admin)):
     if not existing:
         raise HTTPException(status_code=404, detail="Studietype niet gevonden")
     
-    await db.study_types.update_one({"id": type_id}, {"$set": {"isActive": False, "updatedAt": now_iso()}})
+    # Hard delete
+    await db.study_types.delete_one({"id": type_id})
     await log_audit(user["id"], "delete", "study_type", type_id)
     return {"success": True}
+
+@api_router.patch("/study-types/{type_id}/toggle-active")
+async def toggle_study_type_active(type_id: str, user: dict = Depends(require_admin)):
+    existing = await db.study_types.find_one({"id": type_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Studietype niet gevonden")
+    
+    new_active = not existing.get("isActive", True)
+    await db.study_types.update_one({"id": type_id}, {"$set": {"isActive": new_active, "updatedAt": now_iso()}})
+    await log_audit(user["id"], "toggle_active", "study_type", type_id, {"isActive": new_active})
+    
+    updated = await db.study_types.find_one({"id": type_id}, {"_id": 0})
+    return updated
 
 # ============ AVAILABILITY RULES ROUTES ============
 
@@ -677,9 +706,23 @@ async def delete_availability_rule(rule_id: str, user: dict = Depends(require_ad
     if not existing:
         raise HTTPException(status_code=404, detail="Regel niet gevonden")
     
-    await db.availability_rules.update_one({"id": rule_id}, {"$set": {"isActive": False, "updatedAt": now_iso()}})
+    # Hard delete
+    await db.availability_rules.delete_one({"id": rule_id})
     await log_audit(user["id"], "delete", "availability_rule", rule_id)
     return {"success": True}
+
+@api_router.patch("/availability-rules/{rule_id}/toggle-active")
+async def toggle_availability_rule_active(rule_id: str, user: dict = Depends(require_admin)):
+    existing = await db.availability_rules.find_one({"id": rule_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Regel niet gevonden")
+    
+    new_active = not existing.get("isActive", True)
+    await db.availability_rules.update_one({"id": rule_id}, {"$set": {"isActive": new_active, "updatedAt": now_iso()}})
+    await log_audit(user["id"], "toggle_active", "availability_rule", rule_id, {"isActive": new_active})
+    
+    updated = await db.availability_rules.find_one({"id": rule_id}, {"_id": 0})
+    return updated
 
 # ============ EXCLUSION DATES ROUTES ============
 
@@ -691,10 +734,6 @@ async def get_exclusion_dates(user: dict = Depends(get_current_user), includeIna
 
 @api_router.post("/exclusion-dates", response_model=ExclusionDateResponse)
 async def create_exclusion_date(data: ExclusionDateCreate, user: dict = Depends(require_admin)):
-    existing = await db.exclusion_dates.find_one({"date": data.date})
-    if existing:
-        raise HTTPException(status_code=400, detail="Deze datum is al uitgesloten")
-    
     now = now_iso()
     doc = {
         "id": str(uuid.uuid4()),
@@ -705,6 +744,22 @@ async def create_exclusion_date(data: ExclusionDateCreate, user: dict = Depends(
     await db.exclusion_dates.insert_one(doc)
     await log_audit(user["id"], "create", "exclusion_date", doc["id"], {"date": data.date})
     return {k: v for k, v in doc.items() if k != "_id"}
+
+@api_router.put("/exclusion-dates/{date_id}", response_model=ExclusionDateResponse)
+async def update_exclusion_date(date_id: str, data: ExclusionDateCreate, user: dict = Depends(require_admin)):
+    existing = await db.exclusion_dates.find_one({"id": date_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Datum niet gevonden")
+    
+    now = now_iso()
+    update_data = data.model_dump()
+    update_data["updatedAt"] = now
+    
+    await db.exclusion_dates.update_one({"id": date_id}, {"$set": update_data})
+    await log_audit(user["id"], "update", "exclusion_date", date_id)
+    
+    updated = await db.exclusion_dates.find_one({"id": date_id}, {"_id": 0})
+    return updated
 
 @api_router.delete("/exclusion-dates/{date_id}")
 async def delete_exclusion_date(date_id: str, user: dict = Depends(require_admin)):
@@ -861,9 +916,25 @@ async def delete_study_moment(moment_id: str, user: dict = Depends(require_admin
     if not existing:
         raise HTTPException(status_code=404, detail="Moment niet gevonden")
     
-    await db.study_moments.update_one({"id": moment_id}, {"$set": {"isActive": False, "updatedAt": now_iso()}})
+    # Hard delete
+    await db.study_moments.delete_one({"id": moment_id})
     await log_audit(user["id"], "delete", "study_moment", moment_id)
     return {"success": True}
+
+@api_router.patch("/study-moments/{moment_id}/toggle-active")
+async def toggle_study_moment_active(moment_id: str, user: dict = Depends(require_admin)):
+    existing = await db.study_moments.find_one({"id": moment_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Moment niet gevonden")
+    
+    new_active = not existing.get("isActive", True)
+    await db.study_moments.update_one({"id": moment_id}, {"$set": {"isActive": new_active, "updatedAt": now_iso()}})
+    await log_audit(user["id"], "toggle_active", "study_moment", moment_id, {"isActive": new_active})
+    
+    updated = await db.study_moments.find_one({"id": moment_id}, {"_id": 0})
+    count = await db.registrations.count_documents({"studyMomentId": moment_id, "status": RegistrationStatus.REGISTERED})
+    updated["currentRegistrations"] = count
+    return updated
 
 @api_router.post("/study-moments/generate")
 async def generate_study_moments(data: GenerateMomentsRequest, user: dict = Depends(require_admin)):
@@ -878,10 +949,19 @@ async def generate_study_moments(data: GenerateMomentsRequest, user: dict = Depe
         raise HTTPException(status_code=400, detail="Periode mag maximaal 1 jaar zijn")
     
     # Get exclusion dates
-    exclusion_dates = set()
     exclusions = await db.exclusion_dates.find({"isActive": True}, {"_id": 0}).to_list(1000)
+    # Build exclusion map: date -> list of excluded study type IDs (None means ALL excluded)
+    exclusion_map = {}
     for ex in exclusions:
-        exclusion_dates.add(ex["date"])
+        ex_date = ex["date"]
+        ex_types = ex.get("excludedStudyTypeIds") or []
+        if ex_date not in exclusion_map:
+            exclusion_map[ex_date] = {"all": False, "typeIds": set()}
+        if not ex_types:
+            # No specific types = all excluded
+            exclusion_map[ex_date]["all"] = True
+        else:
+            exclusion_map[ex_date]["typeIds"].update(ex_types)
     
     # Get active rules
     rules_query = {"isActive": True}
@@ -900,9 +980,11 @@ async def generate_study_moments(data: GenerateMomentsRequest, user: dict = Depe
         weekday = current.weekday()
         
         # Skip exclusion dates
-        if date_str in exclusion_dates:
-            current += timedelta(days=1)
-            continue
+        if date_str in exclusion_map:
+            if exclusion_map[date_str]["all"]:
+                # All types excluded on this date
+                current += timedelta(days=1)
+                continue
         
         for rule in rules:
             # Check if rule applies to this weekday
@@ -912,6 +994,12 @@ async def generate_study_moments(data: GenerateMomentsRequest, user: dict = Depe
             # Check if date is within rule validity
             if date_str < rule["validFrom"] or date_str > rule["validUntil"]:
                 continue
+            
+            # Check study-type-specific exclusion
+            if date_str in exclusion_map:
+                if rule["studyTypeId"] in exclusion_map[date_str]["typeIds"]:
+                    skipped += 1
+                    continue
             
             # Check if moment already exists
             existing = await db.study_moments.find_one({
@@ -1473,6 +1561,130 @@ async def export_registrations(
     
     return registrations
 
+@api_router.get("/reports/attendance-detail")
+async def get_attendance_detail(
+    user: dict = Depends(require_educator_or_admin),
+    dateFrom: Optional[str] = None,
+    dateTo: Optional[str] = None,
+    classId: Optional[str] = None
+):
+    """Detailed attendance report with percentages per student, class, study type"""
+    reg_query = {"status": RegistrationStatus.REGISTERED}
+    if dateFrom:
+        reg_query["date"] = {"$gte": dateFrom}
+    if dateTo:
+        if "date" in reg_query:
+            reg_query["date"]["$lte"] = dateTo
+        else:
+            reg_query["date"] = {"$lte": dateTo}
+    if classId:
+        reg_query["classId"] = classId
+    
+    registrations = await db.registrations.find(reg_query, {"_id": 0}).to_list(10000)
+    
+    if not registrations:
+        return {"byStudent": [], "byClass": [], "byStudyType": [], "totals": {"total": 0, "present": 0, "absent": 0, "unchecked": 0, "rate": 0}}
+    
+    reg_ids = [r["id"] for r in registrations]
+    attendance_records = await db.attendance.find({"registrationId": {"$in": reg_ids}}, {"_id": 0}).to_list(10000)
+    att_map = {a["registrationId"]: a for a in attendance_records}
+    
+    student_stats = {}
+    class_stats = {}
+    study_type_stats = {}
+    classes_cache = {}
+    study_types_cache = {}
+    total_present = 0
+    total_absent = 0
+    total_unchecked = 0
+    
+    for reg in registrations:
+        student_key = f"{reg['studentName']}_{reg['classId']}"
+        att = att_map.get(reg["id"])
+        
+        if student_key not in student_stats:
+            student_stats[student_key] = {"name": reg["studentName"], "classId": reg["classId"], "total": 0, "present": 0, "absent": 0}
+        student_stats[student_key]["total"] += 1
+        
+        if reg["classId"] not in class_stats:
+            class_stats[reg["classId"]] = {"total": 0, "present": 0, "absent": 0}
+        class_stats[reg["classId"]]["total"] += 1
+        
+        if reg["studyTypeId"] not in study_type_stats:
+            study_type_stats[reg["studyTypeId"]] = {"total": 0, "present": 0, "absent": 0}
+        study_type_stats[reg["studyTypeId"]]["total"] += 1
+        
+        if att:
+            if att["isPresent"]:
+                student_stats[student_key]["present"] += 1
+                class_stats[reg["classId"]]["present"] += 1
+                study_type_stats[reg["studyTypeId"]]["present"] += 1
+                total_present += 1
+            else:
+                student_stats[student_key]["absent"] += 1
+                class_stats[reg["classId"]]["absent"] += 1
+                study_type_stats[reg["studyTypeId"]]["absent"] += 1
+                total_absent += 1
+        else:
+            total_unchecked += 1
+    
+    by_student = []
+    for s in student_stats.values():
+        if s["classId"] not in classes_cache:
+            cls = await db.classes.find_one({"id": s["classId"]}, {"_id": 0})
+            classes_cache[s["classId"]] = cls["name"] if cls else "Onbekend"
+        checked = s["present"] + s["absent"]
+        by_student.append({
+            "name": s["name"],
+            "className": classes_cache[s["classId"]],
+            "classId": s["classId"],
+            "total": s["total"],
+            "present": s["present"],
+            "absent": s["absent"],
+            "rate": round(s["present"] / checked * 100, 1) if checked > 0 else 0
+        })
+    by_student.sort(key=lambda x: x["rate"])
+    
+    by_class = []
+    for cid, cs in class_stats.items():
+        if cid not in classes_cache:
+            cls = await db.classes.find_one({"id": cid}, {"_id": 0})
+            classes_cache[cid] = cls["name"] if cls else "Onbekend"
+        checked = cs["present"] + cs["absent"]
+        by_class.append({
+            "classId": cid, "className": classes_cache[cid],
+            "total": cs["total"], "present": cs["present"], "absent": cs["absent"],
+            "rate": round(cs["present"] / checked * 100, 1) if checked > 0 else 0
+        })
+    by_class.sort(key=lambda x: x["className"])
+    
+    by_study_type = []
+    for stid, sts in study_type_stats.items():
+        if stid not in study_types_cache:
+            st = await db.study_types.find_one({"id": stid}, {"_id": 0})
+            study_types_cache[stid] = st
+        st_info = study_types_cache[stid]
+        checked = sts["present"] + sts["absent"]
+        label = st_info["mainType"] if st_info else "Onbekend"
+        if st_info and st_info.get("subType"):
+            label += f" - {st_info['subType']}"
+        by_study_type.append({
+            "studyTypeId": stid, "label": label,
+            "colorLabel": st_info.get("colorLabel") if st_info else "gray",
+            "total": sts["total"], "present": sts["present"], "absent": sts["absent"],
+            "rate": round(sts["present"] / checked * 100, 1) if checked > 0 else 0
+        })
+    
+    total_checked = total_present + total_absent
+    return {
+        "byStudent": by_student, "byClass": by_class, "byStudyType": by_study_type,
+        "totals": {
+            "total": len(registrations), "present": total_present, "absent": total_absent,
+            "unchecked": total_unchecked,
+            "rate": round(total_present / total_checked * 100, 1) if total_checked > 0 else 0
+        }
+    }
+
 # ============ DASHBOARD ROUTES ============
 
 @api_router.get("/dashboard/stats")
@@ -1533,8 +1745,8 @@ async def get_dashboard_stats(user: dict = Depends(get_current_user)):
 # ============ STUDENTS ROUTES ============
 
 @api_router.get("/students", response_model=List[StudentResponse])
-async def get_students(user: dict = Depends(get_current_user), search: Optional[str] = None, classId: Optional[str] = None):
-    query = {"isActive": True}
+async def get_students(user: dict = Depends(get_current_user), search: Optional[str] = None, classId: Optional[str] = None, includeInactive: bool = False):
+    query = {} if includeInactive else {"isActive": True}
     if classId:
         query["classId"] = classId
     
@@ -1681,8 +1893,23 @@ async def delete_student(student_id: str, user: dict = Depends(require_admin)):
     if not existing:
         raise HTTPException(status_code=404, detail="Leerling niet gevonden")
     
-    await db.students.update_one({"id": student_id}, {"$set": {"isActive": False, "updatedAt": now_iso()}})
+    # Hard delete
+    await db.students.delete_one({"id": student_id})
     return {"success": True}
+
+@api_router.patch("/students/{student_id}/toggle-active")
+async def toggle_student_active(student_id: str, user: dict = Depends(require_admin)):
+    existing = await db.students.find_one({"id": student_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Leerling niet gevonden")
+    
+    new_active = not existing.get("isActive", True)
+    await db.students.update_one({"id": student_id}, {"$set": {"isActive": new_active, "updatedAt": now_iso()}})
+    
+    updated = await db.students.find_one({"id": student_id}, {"_id": 0})
+    cls = await db.classes.find_one({"id": updated["classId"]}, {"_id": 0})
+    updated["className"] = cls["name"] if cls else "Onbekend"
+    return updated
 
 @api_router.post("/students/import-smartschool")
 async def import_smartschool(file: UploadFile = File(...), user: dict = Depends(require_superadmin)):
@@ -1824,7 +2051,7 @@ async def seed_data(user: dict = Depends(require_admin)):
                 **st,
                 "isActive": True,
                 "defaultCapacity": 20,
-                "defaultStartTime": "15:30",
+                "defaultStartTime": "16:00",
                 "defaultEndTime": "17:00",
                 "createdAt": now,
                 "updatedAt": now

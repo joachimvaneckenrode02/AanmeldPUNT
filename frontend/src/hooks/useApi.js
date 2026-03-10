@@ -67,6 +67,7 @@ export const useClasses = () => {
     createClass: (data) => api.post('/classes', data),
     updateClass: (id, data) => api.put(`/classes/${id}`, data),
     deleteClass: (id) => api.del(`/classes/${id}`),
+    toggleClassActive: (id) => api.request('patch', `/classes/${id}/toggle-active`),
     importClasses: async (file) => {
       const formData = new FormData();
       formData.append('file', file);
@@ -86,7 +87,8 @@ export const useStudyTypes = () => {
       api.get('/study-types', { includeInactive }),
     createStudyType: (data) => api.post('/study-types', data),
     updateStudyType: (id, data) => api.put(`/study-types/${id}`, data),
-    deleteStudyType: (id) => api.del(`/study-types/${id}`)
+    deleteStudyType: (id) => api.del(`/study-types/${id}`),
+    toggleStudyTypeActive: (id) => api.request('patch', `/study-types/${id}/toggle-active`)
   };
 };
 
@@ -99,7 +101,8 @@ export const useAvailabilityRules = () => {
       api.get('/availability-rules', { includeInactive }),
     createRule: (data) => api.post('/availability-rules', data),
     updateRule: (id, data) => api.put(`/availability-rules/${id}`, data),
-    deleteRule: (id) => api.del(`/availability-rules/${id}`)
+    deleteRule: (id) => api.del(`/availability-rules/${id}`),
+    toggleRuleActive: (id) => api.request('patch', `/availability-rules/${id}/toggle-active`)
   };
 };
 
@@ -111,6 +114,7 @@ export const useExclusionDates = () => {
     getDates: (includeInactive = false) => 
       api.get('/exclusion-dates', { includeInactive }),
     createDate: (data) => api.post('/exclusion-dates', data),
+    updateDate: (id, data) => api.put(`/exclusion-dates/${id}`, data),
     deleteDate: (id) => api.del(`/exclusion-dates/${id}`)
   };
 };
@@ -127,6 +131,7 @@ export const useStudyMoments = () => {
     createMoment: (data) => api.post('/study-moments', data),
     updateMoment: (id, data) => api.put(`/study-moments/${id}`, data),
     deleteMoment: (id) => api.del(`/study-moments/${id}`),
+    toggleMomentActive: (id) => api.request('patch', `/study-moments/${id}/toggle-active`),
     generateMoments: (data) => api.post('/study-moments/generate', data)
   };
 };
@@ -187,6 +192,7 @@ export const useStudents = () => {
     searchStudents: (query) => api.get('/students/search', { query }),
     createStudent: (data) => api.post('/students', data),
     deleteStudent: (id) => api.del(`/students/${id}`),
+    toggleStudentActive: (id) => api.request('patch', `/students/${id}/toggle-active`),
     importStudents: async (file) => {
       const formData = new FormData();
       formData.append('file', file);
@@ -210,6 +216,7 @@ export const useReports = () => {
   return {
     ...api,
     getSummary: (params) => api.get('/reports/summary', params),
+    getAttendanceDetail: (params) => api.get('/reports/attendance-detail', params),
     exportRegistrations: (params) => api.get('/reports/export', params)
   };
 };

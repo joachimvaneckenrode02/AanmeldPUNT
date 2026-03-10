@@ -99,6 +99,10 @@ const Sidebar = () => {
         {canManageAttendance() && (
           <NavItem {...attendanceItem} />
         )}
+        
+        {canManageAttendance() && !isAdmin() && (
+          <NavItem to="/admin/rapporten" icon={FileText} label="Rapportage" />
+        )}
 
         {isAdmin() && (
           <div className="pt-4 mt-4 border-t border-white/10">
