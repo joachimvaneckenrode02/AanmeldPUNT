@@ -1684,6 +1684,119 @@ async def delete_student(student_id: str, user: dict = Depends(require_admin)):
     await db.students.update_one({"id": student_id}, {"$set": {"isActive": False, "updatedAt": now_iso()}})
     return {"success": True}
 
+@api_router.post("/students/import-smartschool")
+async def import_smartschool(file: UploadFile = File(...), user: dict = Depends(require_superadmin)):
+    """Import students from Smartschool Excel format (superadmin only)
+    
+    Expected format:
+    - Each sheet/tab is a class name
+    - Column B contains student names starting from row 5 (B5, B6, B7, etc.)
+    """
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="Alleen Excel bestanden (.xlsx, .xls) toegestaan")
+    
+    contents = await file.read()
+    try:
+        # Read all sheets
+        excel_file = pd.ExcelFile(BytesIO(contents))
+        sheet_names = excel_file.sheet_names
+        
+        now = now_iso()
+        classes_created = 0
+        classes_skipped = 0
+        students_imported = 0
+        students_skipped = 0
+        errors = []
+        
+        for sheet_name in sheet_names:
+            # Skip empty or system sheets
+            if not sheet_name or sheet_name.startswith('_'):
+                continue
+            
+            class_name = sheet_name.strip()
+            
+            # Create or get class
+            existing_class = await db.classes.find_one({"name": {"$regex": f"^{class_name}$", "$options": "i"}})
+            
+            if existing_class:
+                class_id = existing_class["id"]
+                classes_skipped += 1
+            else:
+                class_id = str(uuid.uuid4())
+                await db.classes.insert_one({
+                    "id": class_id,
+                    "name": class_name,
+                    "isActive": True,
+                    "createdAt": now,
+                    "updatedAt": now
+                })
+                classes_created += 1
+            
+            # Read the sheet - column B (index 1), starting from row 5 (index 4)
+            try:
+                df = pd.read_excel(BytesIO(contents), sheet_name=sheet_name, header=None)
+                
+                # Get column B (index 1) starting from row 5 (index 4)
+                if df.shape[1] > 1:  # Has at least 2 columns
+                    for row_idx in range(4, len(df)):  # Start from row 5 (0-indexed = 4)
+                        cell_value = df.iloc[row_idx, 1]  # Column B = index 1
+                        
+                        if pd.isna(cell_value) or str(cell_value).strip() == '':
+                            continue
+                        
+                        student_name = str(cell_value).strip()
+                        
+                        # Skip header-like values
+                        if student_name.lower() in ['naam', 'name', 'leerling', 'student', 'achternaam', 'voornaam']:
+                            continue
+                        
+                        # Check if student already exists in this class
+                        existing_student = await db.students.find_one({
+                            "name": {"$regex": f"^{student_name}$", "$options": "i"},
+                            "classId": class_id
+                        })
+                        
+                        if existing_student:
+                            students_skipped += 1
+                            continue
+                        
+                        # Create student
+                        await db.students.insert_one({
+                            "id": str(uuid.uuid4()),
+                            "name": student_name,
+                            "classId": class_id,
+                            "email": None,
+                            "isActive": True,
+                            "createdAt": now,
+                            "updatedAt": now
+                        })
+                        students_imported += 1
+                        
+            except Exception as sheet_error:
+                errors.append(f"Fout bij tabblad '{class_name}': {str(sheet_error)}")
+        
+        await log_audit(user["id"], "import_smartschool", "students", "", {
+            "classes_created": classes_created,
+            "students_imported": students_imported
+        })
+        
+        return {
+            "success": True,
+            "classes": {
+                "created": classes_created,
+                "skipped": classes_skipped
+            },
+            "students": {
+                "imported": students_imported,
+                "skipped": students_skipped
+            },
+            "errors": errors[:10]
+        }
+    
+    except Exception as e:
+        logger.error(f"Smartschool import error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Fout bij importeren: {str(e)}")
+
 # ============ SEED DATA ============
 
 @api_router.post("/seed")

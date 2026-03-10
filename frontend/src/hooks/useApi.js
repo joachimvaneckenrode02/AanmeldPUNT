@@ -193,6 +193,13 @@ export const useStudents = () => {
       return api.request('post', '/students/import', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
+    },
+    importSmartschool: async (file) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return api.request('post', '/students/import-smartschool', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
     }
   };
 };

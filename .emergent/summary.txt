@@ -1,0 +1,191 @@
+<analysis>original_problem_statement:
+Ontwikkel een volledige, productieklare webapplicatie voor scholen waarmee leerkrachten leerlingen kunnen aanmelden voor studies en begeleidingsmomenten op school.
+
+**PRODUCT REQUIREMENTS:**
+1.  **Doel:** Webapp voor leerkrachten om leerlingen aan te melden voor studies (Inhaalstudie, Werkstudie, Strafstudie, Leerlabo, etc.).
+2.  **Gebruikers:** Leerkrachten, adminmedewerkers, opvoeders.
+3.  **Architectuur:** Full-stack (React/FastAPI), relationele/document-database, JWT-authenticatie, rolgebaseerde toegang. E-mailverzending en scheduled jobs voor afwezigheidsmeldingen zijn vereist.
+4.  **Rollen:**
+    *   **Leerkracht:** Aanmelden, studies bekijken, capaciteit zien.
+    *   **Admin:** Alles beheren (klassen, studies, regels, momenten, e-mailtemplates, rapporten).
+    *   **Opvoeder:** Aanwezigheden registreren.
+    *   **Superadmin (toegevoegd):** Beheert admins, kan leerlingenlijsten uploaden.
+5.  **Modules:** Leerkrachtenmodule, Admin/backoffice, Aanwezigheidsmodule.
+6.  **Datamodel:** Gedetailleerd model met o.a. , , , , , , .
+7.  **Flows:**
+    *   **Leerkracht:** Formulier om leerling aan te melden, met dynamisch geladen beschikbare momenten.
+    *   **Admin:** Beheer van alle entiteiten, genereren van studiemomenten.
+    *   **Opvoeder:** Aanwezigheden afvinken per studiemoment.
+8.  **Automatische Afwezigheidsmails:** Een scheduled job moet leerkrachten mailen als een leerling afwezig was.
+9.  **Studentenbeheer:** Superadmin moet studenten kunnen importeren via Excel om een autocomplete-functie mogelijk te maken bij het aanmelden.
+10. **Dashboard:** Rol-specifieke dashboards.
+11. **UI:** Afwezige studenten moeten duidelijk gemarkeerd worden in de lijsten van de leerkracht.
+
+**User's preferred language**: Dutch
+
+**what currently exists?**
+Een uitgebreide full-stack applicatie is gebouwd met een React frontend en een FastAPI backend. De applicatie ondersteunt vier gebruikersrollen (Leerkracht, Opvoeder, Admin, Superadmin) met JWT-authenticatie.
+
+De kernfunctionaliteiten zijn geïmplementeerd:
+- **Admin/Superadmin:** Kan klassen, studietypes, beschikbaarheidsregels en gebruikers beheren.
+- **Leerkrachten:** Kunnen leerlingen aanmelden voor studiemomenten via een formulier met student-autocomplete.
+- **Opvoeders:** Kunnen aanwezigheden registreren via een speciale module.
+- **Studentenbeheer:** Een pagina voor de Superadmin om studenten handmatig toe te voegen of te importeren via een Excel-bestand, inclusief een speciale importoptie voor het Smartschool formaat.
+- **UI:** Rolgebaseerde dashboards en navigatie. Afwezigheden worden visueel gemarkeerd.
+
+**Last working item**:
+    - Last item agent was working: Implementatie van een gespecialiseerde importfunctie voor Smartschool Excel-bestanden. Dit stelt de superadmin in staat om zowel klassen (vanuit werkbladnamen) als studenten (vanuit een specifieke kolom/rij) in één keer te importeren. De backend-endpoint () en de frontend-knop zijn gemaakt.
+    - Status: USER VERIFICATION PENDING
+    - Agent Testing Done: N
+    - Which testing method agent to use? Manual testing is vereist door de gebruiker, aangezien de agent het specifieke Excel-bestand niet heeft. Als dit mislukt, moet de agent debuggen met behulp van backend logs.
+    - User Testing Done: N
+
+**All Pending/In progress Issue list**:
+  - Issue 1: Verificatie van de fix voor de standaard klassenimport (P0)
+  - Issue 2: Testen van de nieuwe Smartschool importfunctie (P0)
+  
+  Issues Detail:
+  - Issue 1: 
+     - **Beschrijving**: De gebruiker meldde een fout bij het importeren van klassen via een Excel-bestand.
+     - **Attempted fixes**: De agent identificeerde dat de  bibliotheek ontbrak, heeft deze geïnstalleerd en de  bijgewerkt. De fix is nog niet bevestigd door de gebruiker.
+     - **Next debug checklist**: 
+       1. Vraag de gebruiker om de import opnieuw te proberen.
+       2. Als het nog steeds mislukt, vraag om de exacte foutmelding en de kolomnamen van het Excel-bestand.
+       3. Controleer de backend logs () op fouten met betrekking tot de  endpoint.
+     - **Why fix this issue and what will be achieved with the fix?**: Dit is een kernfunctionaliteit voor de admin om snel klassen in het systeem te krijgen.
+     - **Status**: USER VERIFICATION PENDING
+     - **Is recurring issue?**: N
+     - **Should Test frontend/backend/both after fix?**: backend
+     - **Blocked on other issue**: Nee
+  - Issue 2: 
+     - **Beschrijving**: De nieuw geïmplementeerde Smartschool importfunctie is nog niet getest.
+     - **Attempted fixes**: N/A (nieuwe functie)
+     - **Next debug checklist**:
+       1. Vraag de gebruiker om de nieuwe importknop Importeer van Smartschool te gebruiken met hun specifieke bestand.
+       2. Als er een fout optreedt, inspecteer de backend logs voor de endpoint .
+       3. Controleer de logica in  die de werkbladen en cellen leest om er zeker van te zijn dat deze overeenkomt met de bestandsstructuur van de gebruiker.
+     - **Why fix this issue and what will be achieved with the fix?**: Dit is een belangrijke quality of life functie die de gebruiker specifiek heeft aangevraagd om het importeren van klassen en studenten te stroomlijnen.
+     - **Status**: USER VERIFICATION PENDING
+     - **Is recurring issue?**: N
+     - **Should Test frontend/backend/both after fix?**: backend
+     - **Blocked on other issue**: Nee
+
+**In progress Task List**:
+  - Geen.
+
+**Upcoming and Future Tasks**
+    **Upcoming Tasks:**
+    - **P0: Automatische afwezigheidsmails (Cron Job):** Implementeer de geplande taak (cron job) die dagelijks draait om leerkrachten te e-mailen over afwezige leerlingen. Dit vereist het bouwen van de logica in  en het configureren van een scheduler.
+    - **P1: Rapportagemodule:** Bouw de rapportagepagina in de admin-sectie. Dit moet overzichten van inschrijvingen en aanwezigheden bevatten, met de mogelijkheid om gegevens te exporteren naar CSV/Excel. Vereist nieuwe API-endpoints en frontend componenten.
+    - **P2: E-mailverzending activeren:** Vervang de gemockte e-mailfunctionaliteit door een echte e-mailservice (bv. Resend, SendGrid). Dit omvat het installeren van de SDK, het toevoegen van API-sleutels aan  en het updaten van de e-mailverzendlogica in .
+
+    **Future Tasks:**
+    - **Audit Logging:** Implementeer de  functionaliteit om belangrijke acties (vooral van admins) bij te houden. Het model is gedefinieerd, maar de logica om logs te schrijven is niet geïmplementeerd.
+    - **Koppelingen met externe systemen:** Ontwerp de architectuur om toekomstige koppelingen met Smartschool API, Google Workspace, etc. mogelijk te maken, zoals vermeld in de oorspronkelijke opdracht.
+
+**Completed work in this session**
+- **Volledig authenticatiesysteem:** Gebouwd met JWT en vier rollen (Leerkracht, Opvoeder, Admin, Superadmin).
+- **Gebruikersbeheer:** Superadmins kunnen de rollen van andere gebruikers wijzigen.
+- **Datamodellen & Backend API:** Alle kern-API-endpoints voor CRUD-operaties op klassen, studietypes, beschikbaarheidsregels, studiemomenten, registraties en aanwezigheid zijn gemaakt in .
+- **Frontend Applicatie:** Een volledige React-app met rolgebaseerde navigatie, dashboards en beheermodules.
+- **Registratieflow voor Leerkrachten:** Een formulier waar leerkrachten leerlingen kunnen aanmelden, inclusief een autocomplete-zoekfunctie voor studenten.
+- **Aanwezigheidsmodule:** Een pagina voor opvoeders om de aanwezigheid van leerlingen per studiemoment te registreren.
+- **Studentenbeheer:** Een adminpagina om studenten te beheren, inclusief een functie om studenten via Excel te importeren.
+- **Speciale Smartschool Import:** Een aangepaste importfunctie gebouwd om te voldoen aan een specifieke Excel-indeling van de gebruiker.
+- **Visuele feedback:** Afwezige leerlingen worden duidelijk gemarkeerd in de UI voor leerkrachten.
+
+**Earlier issues found/mentioned but not fixed**
+   - Geen.
+
+**Known issue recurrence from previous fork**
+  - Geen.
+
+**Code Architecture**
+
+
+**Key Technical Concepts**
+- **Backend:** FastAPI
+- **Frontend:** React
+- **Database:** MongoDB
+- **Styling:** TailwindCSS, Shadcn/UI
+- **Authentication:** JSON Web Tokens (JWT)
+- **Data Handling:**  en  voor Excel-verwerking.
+
+**key DB schema**
+  - **users**: {name, email, passwordHash, role, isActive}
+  - **classes**: {name, isActive}
+  - **students**: {name, classId}
+  - **studyTypes**: {mainType, subType, key, defaultCapacity, ...}
+  - **studyMoments**: {date, studyTypeId, capacity, ...}
+  - **registrations**: {teacherName, studentName, classId, studyMomentId, status, ...}
+  - **attendance**: {registrationId, isPresent, checkedByUserId, ...}
+
+**changes in tech stack**
+  - Geen.
+
+**All files of reference**
+- : Bevat de volledige backend-logica, inclusief alle modellen, API-endpoints en de logica voor de Excel-imports.
+- : Bevat nu  en .
+- : De frontend-pagina voor studentenbeheer met de importknoppen.
+- : De pagina voor leerkrachten om leerlingen aan te melden, met de student-autocomplete.
+- : Toont nu rol-specifieke informatie.
+- : Toont de aanmeldingen van een leerkracht, met markeringen voor afwezige leerlingen.
+- : Bevat alle routes van de applicatie.
+- : Bevat de rol-specifieke navigatie.
+- : Bevat alle frontend API-aanroepen.
+
+**Areas that need refactoring**:
+- Geen.
+
+**key api endpoints**
+- , 
+- , 
+- , 
+- , 
+- 
+- , 
+- , 
+- 
+
+**Critical Info for New Agent**
+- De gebruiker  is de superadmin. Het wachtwoord is gereset naar .
+- Er zijn twee verschillende Excel-importfuncties op de backend:
+    1.  : Een generieke import voor klassen (deze had een bug die nu gefixt zou moeten zijn).
+    2.  : Een nieuwe, specifieke import voor klassen én studenten uit een Smartschool-bestand (deze moet nog door de gebruiker getest worden).
+- E-mailverzending is momenteel uitgeschakeld/gemockt in de backend. Dit is een belangrijke, nog te implementeren functie.
+- De applicatie en alle communicatie moeten in het Nederlands zijn.
+
+**documents and test reports created in this job**
+  - /app/test_reports/iteration_1.json
+  - /app/test_reports/iteration_2.json
+  - /app/design_guidelines.json
+
+**Last 10 User Messages and any pending HUMAN messages** 
+ - **User (latest):** Vraagt of een specifiek Excel-formaat van Smartschool (klassen in tabbladen, leerlingen in kolom B vanaf rij 5) gebruikt kan worden om zowel klassen als leerlingen te importeren. **Status: Implemented, pending user testing.**
+ - **User:** Rapporteert dat het importeren van klassen vanuit Excel een fout geeft. **Status: Fix attempted, pending user verification.**
+ - **User:** Vraagt om een reeks belangrijke wijzigingen: een 'superadmin'-rol, de mogelijkheid om leerlingenlijsten te uploaden voor autocomplete, het markeren van afwezigen in het dashboard van de leerkracht, rol-specifieke dashboards, en de mogelijkheid voor de superadmin om gebruikersrollen aan te passen. **Status: Completed.**
+
+**Project Health Check:**
+- **Functional:** De meeste kernfuncties zijn geïmplementeerd en werken.
+- **Broken:** De Excel-importfuncties zijn momenteel onbetrouwbaar omdat ze wachten op verificatie van de gebruiker na een bugfix en een nieuwe implementatie.
+- **Mocked:** E-mailverzending is volledig gemockt en niet-functioneel.
+
+**3rd Party Integrations**
+ - : Gebruikt voor het verwerken van Excel-bestanden op de backend.
+ - : Vereiste dependency voor  om -bestanden te lezen.
+
+**Testing status**
+  - Testing agent used after significant changes: YES (twee keer uitgevoerd met succes)
+  - Troubleshoot agent used after agent stuck in loop: NO
+  - Test files created: Geen.
+  - Known regressions: De functionaliteit van de Excel-import is onzeker na de laatste wijzigingen.
+
+**Credentials to test flow:**
+- **Gebruiker:** 
+- **Wachtwoord:** 
+- **Rol:** Superadmin
+
+**What agent forgot to execute**
+- **Cron job voor afwezigheidsmails:** Dit was een Prio 1-vereiste uit de oorspronkelijke opdracht, maar is nog niet geïmplementeerd.
+- **Rapportagemodule:** De volledige module voor rapportage en export naar CSV/Excel ontbreekt nog.
+- **Audit Logging:** Het model is gedefinieerd, maar er wordt geen data naar geschreven.</analysis>

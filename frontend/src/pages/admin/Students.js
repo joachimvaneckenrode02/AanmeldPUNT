@@ -29,15 +29,16 @@ import {
   Plus, 
   Upload, 
   Trash2,
-  Users,
   FileSpreadsheet,
   Search,
-  AlertCircle
+  AlertCircle,
+  CheckCircle2,
+  School
 } from 'lucide-react';
 
 export default function AdminStudents() {
   const { isSuperAdmin } = useAuth();
-  const { getStudents, createStudent, deleteStudent, importStudents, loading } = useStudents();
+  const { getStudents, createStudent, deleteStudent, importStudents, importSmartschool, loading } = useStudents();
   const { getClasses } = useClasses();
   
   const [students, setStudents] = useState([]);
@@ -49,7 +50,9 @@ export default function AdminStudents() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterClass, setFilterClass] = useState('all');
   const [importResult, setImportResult] = useState(null);
+  const [importing, setImporting] = useState(false);
   const fileInputRef = useRef(null);
+  const smartschoolInputRef = useRef(null);
 
   useEffect(() => {
     loadData();
@@ -120,18 +123,43 @@ export default function AdminStudents() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setImporting(true);
     try {
       const result = await importStudents(file);
-      setImportResult(result);
+      setImportResult({ type: 'standard', ...result });
       toast.success(`${result.imported} leerlingen geïmporteerd, ${result.skipped} overgeslagen`);
       loadData();
     } catch (error) {
       // Error handled by useApi
+    } finally {
+      setImporting(false);
     }
     
-    // Reset file input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  };
+
+  const handleSmartschoolUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    try {
+      const result = await importSmartschool(file);
+      setImportResult({ type: 'smartschool', ...result });
+      toast.success(
+        `Smartschool import: ${result.classes.created} klassen aangemaakt, ${result.students.imported} leerlingen geïmporteerd`
+      );
+      loadData();
+    } catch (error) {
+      // Error handled by useApi
+    } finally {
+      setImporting(false);
+    }
+    
+    if (smartschoolInputRef.current) {
+      smartschoolInputRef.current.value = '';
     }
   };
 
@@ -150,12 +178,34 @@ export default function AdminStudents() {
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Leerlingen</h1>
           <p className="text-slate-500 mt-1">
-            Beheer de leerlingenlijst voor autocomplete
+            Beheer de leerlingenlijst voor autocomplete bij aanmelden
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           {isSuperAdmin() && (
             <>
+              <input
+                type="file"
+                ref={smartschoolInputRef}
+                onChange={handleSmartschoolUpload}
+                accept=".xlsx,.xls"
+                className="hidden"
+              />
+              <Button 
+                variant="outline"
+                className="border-[#D66D4F] text-[#D66D4F] hover:bg-[#D66D4F]/10"
+                onClick={() => smartschoolInputRef.current?.click()}
+                disabled={importing}
+                data-testid="import-smartschool-btn"
+              >
+                {importing ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <School className="w-4 h-4 mr-2" />
+                )}
+                Smartschool Import
+              </Button>
+              
               <input
                 type="file"
                 ref={fileInputRef}
@@ -166,10 +216,15 @@ export default function AdminStudents() {
               <Button 
                 variant="outline" 
                 onClick={() => fileInputRef.current?.click()}
+                disabled={importing}
                 data-testid="import-students-btn"
               >
-                <Upload className="w-4 h-4 mr-2" />
-                Importeren
+                {importing ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Upload className="w-4 h-4 mr-2" />
+                )}
+                Standaard Import
               </Button>
             </>
           )}
@@ -184,16 +239,22 @@ export default function AdminStudents() {
         </div>
       </div>
 
-      {/* Info card for superadmin */}
+      {/* Smartschool info card */}
       {isSuperAdmin() && (
-        <Card className="border-0 shadow-sm bg-blue-50">
+        <Card className="border-0 shadow-sm bg-gradient-to-r from-[#D66D4F]/10 to-transparent border-l-4 border-l-[#D66D4F]">
           <CardContent className="p-4 flex items-start gap-3">
-            <FileSpreadsheet className="w-5 h-5 text-blue-600 mt-0.5" />
+            <School className="w-5 h-5 text-[#D66D4F] mt-0.5 flex-shrink-0" />
             <div>
-              <p className="text-sm font-medium text-blue-900">Excel import voor leerlingen</p>
-              <p className="text-sm text-blue-700">
-                Upload een Excel of CSV bestand met kolommen "naam" (of "leerling") en "klas". 
-                De klas moet overeenkomen met een bestaande klas in het systeem.
+              <p className="text-sm font-medium text-slate-900">Smartschool Import</p>
+              <p className="text-sm text-slate-600 mt-1">
+                Upload een Excel bestand uit Smartschool. Het systeem leest:
+              </p>
+              <ul className="text-sm text-slate-600 mt-1 list-disc list-inside">
+                <li>Elk <strong>tabblad</strong> (onderaan) wordt een klas</li>
+                <li>Kolom <strong>B vanaf rij 5</strong> bevat de leerlingennamen</li>
+              </ul>
+              <p className="text-sm text-slate-500 mt-2">
+                Klassen worden automatisch aangemaakt als ze nog niet bestaan.
               </p>
             </div>
           </CardContent>
@@ -201,18 +262,53 @@ export default function AdminStudents() {
       )}
 
       {/* Import result */}
-      {importResult && importResult.errors?.length > 0 && (
-        <Card className="border-0 shadow-sm bg-amber-50">
+      {importResult && (
+        <Card className={`border-0 shadow-sm ${importResult.errors?.length > 0 ? 'bg-amber-50' : 'bg-emerald-50'}`}>
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5" />
-              <div>
-                <p className="text-sm font-medium text-amber-900">Sommige leerlingen konden niet worden geïmporteerd:</p>
-                <ul className="mt-2 text-sm text-amber-700 list-disc list-inside">
-                  {importResult.errors.map((err, i) => (
-                    <li key={i}>{err}</li>
-                  ))}
-                </ul>
+              {importResult.errors?.length > 0 ? (
+                <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5" />
+              ) : (
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 mt-0.5" />
+              )}
+              <div className="flex-1">
+                <p className="text-sm font-medium text-slate-900">
+                  {importResult.type === 'smartschool' ? 'Smartschool import resultaat:' : 'Import resultaat:'}
+                </p>
+                {importResult.type === 'smartschool' ? (
+                  <div className="mt-2 grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-slate-600">Klassen aangemaakt: <strong className="text-emerald-700">{importResult.classes?.created || 0}</strong></p>
+                      <p className="text-slate-600">Klassen overgeslagen: <span className="text-slate-500">{importResult.classes?.skipped || 0}</span></p>
+                    </div>
+                    <div>
+                      <p className="text-slate-600">Leerlingen geïmporteerd: <strong className="text-emerald-700">{importResult.students?.imported || 0}</strong></p>
+                      <p className="text-slate-600">Leerlingen overgeslagen: <span className="text-slate-500">{importResult.students?.skipped || 0}</span></p>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-600 mt-1">
+                    {importResult.imported} leerlingen geïmporteerd, {importResult.skipped} overgeslagen
+                  </p>
+                )}
+                {importResult.errors?.length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-sm font-medium text-amber-900">Fouten:</p>
+                    <ul className="mt-1 text-sm text-amber-700 list-disc list-inside">
+                      {importResult.errors.map((err, i) => (
+                        <li key={i}>{err}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="mt-2 text-slate-500"
+                  onClick={() => setImportResult(null)}
+                >
+                  Sluiten
+                </Button>
               </div>
             </div>
           </CardContent>
@@ -254,6 +350,8 @@ export default function AdminStudents() {
         <span>{filteredStudents.length} leerlingen weergegeven</span>
         <span>•</span>
         <span>{students.length} totaal</span>
+        <span>•</span>
+        <span>{classes.filter(c => c.isActive).length} klassen</span>
       </div>
 
       {/* Table */}
@@ -274,7 +372,7 @@ export default function AdminStudents() {
                   <TableCell colSpan={4} className="text-center py-8 text-slate-500">
                     {searchQuery || filterClass !== 'all' 
                       ? 'Geen leerlingen gevonden' 
-                      : 'Nog geen leerlingen. Voeg er een toe of importeer via Excel.'}
+                      : 'Nog geen leerlingen. Gebruik de Smartschool Import knop om leerlingen te importeren.'}
                   </TableCell>
                 </TableRow>
               ) : (
