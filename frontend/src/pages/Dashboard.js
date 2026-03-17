@@ -121,10 +121,16 @@ export default function Dashboard() {
                       <p className={`text-sm ${item.read ? 'text-slate-600' : 'font-medium text-rose-900'}`}>
                         <span className="font-semibold">{item.studentName}</span>
                         <span className="text-slate-500"> ({item.className})</span>
-                        <span className={item.read ? 'text-slate-500' : 'text-rose-700'}> was afwezig bij </span>
+                        <span className={item.read ? 'text-slate-500' : item.status === 'sick' ? 'text-amber-700' : 'text-rose-700'}>
+                          {item.status === 'sick' ? ' was ziek' : ' was afwezig'}
+                        </span>
+                        <span className={item.read ? 'text-slate-500' : 'text-slate-600'}> bij </span>
                         <span className="font-medium">{item.studyLabel}</span>
                       </p>
-                      <p className="text-xs text-slate-400 mt-0.5">{formatDateShort(item.date)}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {formatDateShort(item.date)}
+                        {item.educatorNote && <span className="ml-2 text-blue-500">Bericht: {item.educatorNote}</span>}
+                      </p>
                     </div>
                   </div>
                   {!item.read && (

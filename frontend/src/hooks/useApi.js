@@ -157,6 +157,7 @@ export const useAttendance = () => {
     getAttendance: (params) => api.get('/attendance', params),
     getByDate: (date) => api.get(`/attendance/by-date/${date}`),
     recordAttendance: (data) => api.post('/attendance', data),
+    addStudentToMoment: (data) => api.post('/attendance/add-student', data),
     updateAttendance: (id, data) => api.put(`/attendance/${id}`, data)
   };
 };

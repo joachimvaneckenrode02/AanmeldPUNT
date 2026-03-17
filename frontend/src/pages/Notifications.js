@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../co
 import { Button } from '../components/ui/button';
 import { formatDateShort } from '../lib/utils';
 import { 
-  Loader2, Inbox, Check, CheckCheck, XCircle, Bell
+  Loader2, Inbox, Check, CheckCheck, XCircle, Bell, Thermometer, MessageSquare
 } from 'lucide-react';
 
 export default function Notifications() {
@@ -100,17 +100,31 @@ export default function Notifications() {
                 >
                   <div className="flex items-center gap-4 flex-1 min-w-0">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      item.read ? 'bg-slate-100' : 'bg-rose-100'
+                      item.read ? 'bg-slate-100' : item.status === 'sick' ? 'bg-amber-100' : 'bg-rose-100'
                     }`}>
-                      <XCircle className={`w-5 h-5 ${item.read ? 'text-slate-400' : 'text-rose-500'}`} />
+                      {item.status === 'sick' 
+                        ? <Thermometer className={`w-5 h-5 ${item.read ? 'text-slate-400' : 'text-amber-500'}`} />
+                        : <XCircle className={`w-5 h-5 ${item.read ? 'text-slate-400' : 'text-rose-500'}`} />
+                      }
                     </div>
                     <div className="min-w-0">
                       <p className={`text-sm ${item.read ? 'text-slate-600' : 'font-medium text-slate-900'}`}>
                         <span className="font-semibold">{item.studentName}</span>
                         <span className="text-slate-500"> ({item.className})</span>
-                        <span className={item.read ? 'text-slate-500' : 'text-rose-700'}> was afwezig bij </span>
+                        <span className={item.read ? 'text-slate-500' : item.status === 'sick' ? 'text-amber-700' : 'text-rose-700'}>
+                          {item.status === 'sick' ? ' was ziek' : ' was afwezig'}
+                        </span>
+                        <span className={item.read ? 'text-slate-500' : 'text-slate-700'}> bij </span>
                         <span className="font-medium">{item.studyLabel}</span>
                       </p>
+                      {item.absenceReason && (
+                        <p className="text-xs text-slate-500 mt-0.5">Reden: {item.absenceReason}</p>
+                      )}
+                      {item.educatorNote && (
+                        <p className="text-xs text-blue-600 mt-0.5 flex items-center gap-1">
+                          <MessageSquare className="w-3 h-3" />Bericht opvoeder: {item.educatorNote}
+                        </p>
+                      )}
                       <p className="text-xs text-slate-400 mt-0.5">{formatDateShort(item.date)}</p>
                     </div>
                   </div>

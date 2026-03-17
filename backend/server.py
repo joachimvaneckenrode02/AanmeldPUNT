@@ -255,10 +255,18 @@ class RegistrationUpdate(BaseModel):
     note: Optional[str] = None
 
 # Attendance Models
+class AttendanceStatusEnum:
+    PRESENT = "present"
+    ABSENT = "absent"
+    SICK = "sick"
+
 class AttendanceBase(BaseModel):
     registrationId: str
     studyMomentId: str
-    isPresent: bool
+    isPresent: bool = True
+    status: Optional[str] = "present"  # present, absent, sick
+    absenceReason: Optional[str] = None
+    educatorNote: Optional[str] = None  # message to teacher
     note: Optional[str] = None
 
 class AttendanceCreate(AttendanceBase):
@@ -266,6 +274,9 @@ class AttendanceCreate(AttendanceBase):
 
 class AttendanceUpdate(BaseModel):
     isPresent: bool
+    status: Optional[str] = None
+    absenceReason: Optional[str] = None
+    educatorNote: Optional[str] = None
     note: Optional[str] = None
 
 class AttendanceResponse(BaseModel):
@@ -278,6 +289,9 @@ class AttendanceResponse(BaseModel):
     classSnapshot: str
     teacherEmailSnapshot: str
     isPresent: bool
+    status: Optional[str] = "present"
+    absenceReason: Optional[str] = None
+    educatorNote: Optional[str] = None
     checkedAt: Optional[str] = None
     checkedByUserId: Optional[str] = None
     note: Optional[str] = None
@@ -1057,7 +1071,7 @@ async def get_absence_feed(user: dict = Depends(get_current_user)):
     
     reg_ids = [r["id"] for r in my_regs]
     
-    # Get attendance records that are absent
+    # Get attendance records that are absent or sick
     absent_attendance = await db.attendance.find(
         {"registrationId": {"$in": reg_ids}, "isPresent": False},
         {"_id": 0}
@@ -1077,6 +1091,9 @@ async def get_absence_feed(user: dict = Depends(get_current_user)):
             "studyLabel": reg.get("studyLabelSnapshot", ""),
             "date": reg["date"],
             "checkedAt": att.get("checkedAt", ""),
+            "status": att.get("status", "absent"),
+            "absenceReason": att.get("absenceReason"),
+            "educatorNote": att.get("educatorNote"),
             "read": att.get("readByTeacher", False)
         })
     
@@ -1344,6 +1361,9 @@ async def get_attendance_by_date(date: str, user: dict = Depends(require_educato
                     "classSnapshot": cls["name"] if cls else "Onbekend",
                     "teacherEmailSnapshot": reg["teacherEmail"],
                     "isPresent": True,
+                    "status": AttendanceStatusEnum.PRESENT,
+                    "absenceReason": None,
+                    "educatorNote": None,
                     "checkedAt": now,
                     "checkedByUserId": user["id"],
                     "note": None,
@@ -1377,6 +1397,10 @@ async def record_attendance(data: AttendanceCreate, user: dict = Depends(require
     if not registration:
         raise HTTPException(status_code=400, detail="Registratie niet gevonden")
     
+    # Derive isPresent from status
+    status = data.status or ("present" if data.isPresent else "absent")
+    is_present = status == AttendanceStatusEnum.PRESENT
+    
     # Check if attendance already exists
     existing = await db.attendance.find_one({
         "registrationId": data.registrationId,
@@ -1387,16 +1411,17 @@ async def record_attendance(data: AttendanceCreate, user: dict = Depends(require
     
     if existing:
         # Update existing
-        await db.attendance.update_one(
-            {"id": existing["id"]},
-            {"$set": {
-                "isPresent": data.isPresent,
-                "note": data.note,
-                "checkedAt": now,
-                "checkedByUserId": user["id"],
-                "updatedAt": now
-            }}
-        )
+        update_fields = {
+            "isPresent": is_present,
+            "status": status,
+            "absenceReason": data.absenceReason,
+            "educatorNote": data.educatorNote,
+            "note": data.note,
+            "checkedAt": now,
+            "checkedByUserId": user["id"],
+            "updatedAt": now
+        }
+        await db.attendance.update_one({"id": existing["id"]}, {"$set": update_fields})
         updated = await db.attendance.find_one({"id": existing["id"]}, {"_id": 0})
         return updated
     
@@ -1411,7 +1436,10 @@ async def record_attendance(data: AttendanceCreate, user: dict = Depends(require
         "studentNameSnapshot": registration["studentName"],
         "classSnapshot": cls["name"] if cls else "Onbekend",
         "teacherEmailSnapshot": registration["teacherEmail"],
-        "isPresent": data.isPresent,
+        "isPresent": is_present,
+        "status": status,
+        "absenceReason": data.absenceReason,
+        "educatorNote": data.educatorNote,
         "checkedAt": now,
         "checkedByUserId": user["id"],
         "note": data.note,
@@ -1422,10 +1450,92 @@ async def record_attendance(data: AttendanceCreate, user: dict = Depends(require
     await db.attendance.insert_one(att_doc)
     await log_audit(user["id"], "record", "attendance", att_doc["id"], {
         "student": registration["studentName"],
-        "isPresent": data.isPresent
+        "status": status
     })
     
     return {k: v for k, v in att_doc.items() if k != "_id"}
+
+@api_router.post("/attendance/add-student")
+async def add_student_to_moment(
+    data: dict,
+    user: dict = Depends(require_educator_or_admin)
+):
+    """Educator manually adds a student to a study moment (late arrival, walk-in)"""
+    student_name = data.get("studentName")
+    class_id = data.get("classId")
+    study_moment_id = data.get("studyMomentId")
+    note = data.get("note", "")
+    
+    if not student_name or not class_id or not study_moment_id:
+        raise HTTPException(status_code=400, detail="studentName, classId en studyMomentId zijn vereist")
+    
+    moment = await db.study_moments.find_one({"id": study_moment_id}, {"_id": 0})
+    if not moment:
+        raise HTTPException(status_code=404, detail="Studiemoment niet gevonden")
+    
+    cls = await db.classes.find_one({"id": class_id}, {"_id": 0})
+    class_name = cls["name"] if cls else "Onbekend"
+    
+    # Check for duplicate
+    existing = await db.registrations.find_one({
+        "studentName": student_name,
+        "studyMomentId": study_moment_id,
+        "status": RegistrationStatus.REGISTERED
+    })
+    if existing:
+        raise HTTPException(status_code=400, detail="Leerling is al ingeschreven voor dit moment")
+    
+    now = now_iso()
+    
+    # Create a registration on behalf of the educator
+    reg_doc = {
+        "id": str(uuid.uuid4()),
+        "teacherName": user["name"],
+        "teacherEmail": user["email"],
+        "studentName": student_name,
+        "studentEmail": None,
+        "classId": class_id,
+        "className": class_name,
+        "studyTypeId": moment["studyTypeId"],
+        "studyLabelSnapshot": moment["labelFull"],
+        "date": moment["date"],
+        "startTime": moment["startTime"],
+        "endTime": moment["endTime"],
+        "studyMomentId": study_moment_id,
+        "status": RegistrationStatus.REGISTERED,
+        "note": note or "Manueel toegevoegd door opvoeder",
+        "confirmationEmailSent": False,
+        "absenceEmailSent": False,
+        "createdAt": now,
+        "updatedAt": now
+    }
+    await db.registrations.insert_one(reg_doc)
+    
+    # Auto-create attendance as present
+    att_doc = {
+        "id": str(uuid.uuid4()),
+        "registrationId": reg_doc["id"],
+        "studyMomentId": study_moment_id,
+        "date": moment["date"],
+        "studentNameSnapshot": student_name,
+        "classSnapshot": class_name,
+        "teacherEmailSnapshot": user["email"],
+        "isPresent": True,
+        "status": AttendanceStatusEnum.PRESENT,
+        "absenceReason": None,
+        "educatorNote": None,
+        "checkedAt": now,
+        "checkedByUserId": user["id"],
+        "note": None,
+        "createdAt": now,
+        "updatedAt": now
+    }
+    await db.attendance.insert_one(att_doc)
+    
+    return {
+        "registration": {k: v for k, v in reg_doc.items() if k != "_id"},
+        "attendance": {k: v for k, v in att_doc.items() if k != "_id"}
+    }
 
 @api_router.put("/attendance/{att_id}", response_model=AttendanceResponse)
 async def update_attendance(att_id: str, data: AttendanceUpdate, user: dict = Depends(require_educator_or_admin)):
