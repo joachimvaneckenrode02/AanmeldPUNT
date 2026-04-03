@@ -41,12 +41,13 @@ export const AuthProvider = ({ children }) => {
     return userData;
   };
 
-  const register = async (name, email, password, confirmPassword) => {
+  const register = async (name, email, password, confirmPassword, schoolCode) => {
     const response = await axios.post(`${API_URL}/api/auth/register`, {
       name,
       email,
       password,
-      confirmPassword
+      confirmPassword,
+      schoolCode
     });
     const { token: newToken, user: userData } = response.data;
     localStorage.setItem('token', newToken);
@@ -54,6 +55,36 @@ export const AuthProvider = ({ children }) => {
     setToken(newToken);
     setUser(userData);
     return userData;
+  };
+
+  const switchSchool = async (schoolId) => {
+    try {
+      const response = await axios.post(`${API_URL}/api/auth/switch-school?schoolId=${schoolId}`);
+      const { token: newToken, user: userData } = response.data;
+      localStorage.setItem('token', newToken);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+      setToken(newToken);
+      setUser(userData);
+      return userData;
+    } catch (error) {
+      console.error('Failed to switch school:', error);
+      throw error;
+    }
+  };
+
+  const joinSchool = async (schoolCode) => {
+    try {
+      const response = await axios.post(`${API_URL}/api/auth/join-school?schoolCode=${schoolCode}`);
+      const { token: newToken, user: userData } = response.data;
+      localStorage.setItem('token', newToken);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+      setToken(newToken);
+      setUser(userData);
+      return userData;
+    } catch (error) {
+      console.error('Failed to join school:', error);
+      throw error;
+    }
   };
 
   const logout = () => {
@@ -76,6 +107,8 @@ export const AuthProvider = ({ children }) => {
       loading,
       login,
       register,
+      switchSchool,
+      joinSchool,
       logout,
       isAdmin,
       isSuperAdmin,

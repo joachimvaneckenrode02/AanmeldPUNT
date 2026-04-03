@@ -28,6 +28,7 @@ import AdminEmailTemplates from './pages/admin/EmailTemplates';
 import AdminRegistrations from './pages/admin/Registrations';
 import AdminReports from './pages/admin/Reports';
 import AdminUsers from './pages/admin/Users';
+import AdminSchools from './pages/admin/Schools';
 
 import './App.css';
 
@@ -60,6 +61,7 @@ function App() {
             <Route path="admin/aanmeldingen" element={<AdminRegistrations />} />
             <Route path="admin/rapporten" element={<AdminReports />} />
             <Route path="admin/gebruikers" element={<AdminUsers />} />
+            <Route path="admin/scholen" element={<AdminSchools />} />
           </Route>
 
           {/* Fallback */}

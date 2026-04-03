@@ -2,7 +2,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFi
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
+from db import create_db
 import os
 import logging
 from pathlib import Path
@@ -18,10 +18,8 @@ import pandas as pd
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+# SQLite connection (no external DB needed)
+db = create_db()
 
 # JWT Config
 JWT_SECRET = os.environ.get('JWT_SECRET', 'school-study-secret-key-change-in-production')
@@ -46,6 +44,42 @@ logger = logging.getLogger(__name__)
 
 # ============ MODELS ============
 
+# School Models
+class SchoolBase(BaseModel):
+    name: str
+    slug: str
+    accessCode: str  # Required code to join this school
+    address: Optional[str] = None
+    city: Optional[str] = None
+    isActive: bool = True
+
+class SchoolCreate(SchoolBase):
+    pass
+
+class SchoolResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    name: str
+    slug: str
+    accessCode: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    isActive: bool
+    createdAt: str
+    updatedAt: str
+
+class SchoolListItem(BaseModel):
+    id: str
+    name: str
+    slug: str
+    city: Optional[str] = None
+
+# User-School Link
+class UserSchoolLink(BaseModel):
+    userId: str
+    schoolId: str
+    role: str = "teacher"
+
 # User Models
 class UserRole:
     TEACHER = "teacher"
@@ -63,6 +97,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     confirmPassword: str
+    schoolCode: Optional[str] = None  # Access code to join a school
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -353,10 +388,11 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 
-def create_token(user_id: str, role: str) -> str:
+def create_token(user_id: str, role: str, active_school_id: str = None) -> str:
     payload = {
         "sub": user_id,
         "role": role,
+        "sid": active_school_id,  # active school id
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
@@ -374,6 +410,9 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             raise HTTPException(status_code=401, detail="Gebruiker niet gevonden")
         if not user.get("isActive", True):
             raise HTTPException(status_code=401, detail="Account is gedeactiveerd")
+        
+        # Add active school from token
+        user["activeSchoolId"] = payload.get("sid")
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token is verlopen")
@@ -397,6 +436,30 @@ async def require_educator_or_admin(user: dict = Depends(get_current_user)):
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+def get_school_id(user: dict) -> str:
+    """Get active school ID from user. Always returns activeSchoolId for filtering."""
+    school_id = user.get("activeSchoolId")
+    if not school_id and user.get("role") != UserRole.SUPERADMIN:
+        raise HTTPException(status_code=400, detail="Geen school geselecteerd")
+    return school_id  # Returns None only for superadmin without active school
+
+async def get_user_schools(user_id: str) -> list:
+    """Get all schools a user belongs to."""
+    links = await db.user_schools.find({"userId": user_id}).to_list(100)
+    school_ids = [l["schoolId"] for l in links]
+    schools = []
+    for sid in school_ids:
+        school = await db.schools.find_one({"id": sid})
+        if school:
+            link = next((l for l in links if l["schoolId"] == sid), {})
+            schools.append({
+                "id": school["id"],
+                "name": school["name"],
+                "slug": school["slug"],
+                "role": link.get("role", "teacher")
+            })
+    return schools
 
 async def log_audit(user_id: str, action: str, entity_type: str, entity_id: str, metadata: dict = None):
     await db.audit_logs.insert_one({
@@ -426,9 +489,22 @@ async def register(data: UserCreate):
     user_id = str(uuid.uuid4())
     now = now_iso()
     
-    # First user becomes admin
+    # First user becomes superadmin (no school needed)
     user_count = await db.users.count_documents({})
-    role = UserRole.ADMIN if user_count == 0 else UserRole.TEACHER
+    is_first_user = user_count == 0
+    role = UserRole.SUPERADMIN if is_first_user else UserRole.TEACHER
+    
+    # Non-first users must provide a school code
+    if not is_first_user and not data.schoolCode:
+        raise HTTPException(status_code=400, detail="Voer de schoolcode in")
+    
+    # Validate school code
+    active_school_id = None
+    if data.schoolCode:
+        school = await db.schools.find_one({"accessCode": data.schoolCode, "isActive": True})
+        if not school:
+            raise HTTPException(status_code=400, detail="Ongeldige schoolcode")
+        active_school_id = school["id"]
     
     user_doc = {
         "id": user_id,
@@ -442,7 +518,19 @@ async def register(data: UserCreate):
     }
     
     await db.users.insert_one(user_doc)
-    token = create_token(user_id, role)
+    
+    # Create user-school link
+    if active_school_id:
+        await db.user_schools.insert_one({
+            "id": str(uuid.uuid4()),
+            "userId": user_id,
+            "schoolId": active_school_id,
+            "role": role if is_first_user else UserRole.TEACHER,
+            "createdAt": now
+        })
+    
+    token = create_token(user_id, role, active_school_id)
+    schools = await get_user_schools(user_id)
     
     return {
         "token": token,
@@ -452,7 +540,9 @@ async def register(data: UserCreate):
             "email": data.email.lower(),
             "role": role,
             "isActive": True,
-            "createdAt": now
+            "createdAt": now,
+            "activeSchoolId": active_school_id,
+            "schools": schools
         }
     }
 
@@ -468,7 +558,13 @@ async def login(data: UserLogin):
     if not user.get("isActive", True):
         raise HTTPException(status_code=401, detail="Account is gedeactiveerd")
     
-    token = create_token(user["id"], user["role"])
+    # Get user's schools
+    schools = await get_user_schools(user["id"])
+    
+    # Pick first school as active (or None for superadmin with no schools)
+    active_school_id = schools[0]["id"] if schools else None
+    
+    token = create_token(user["id"], user["role"], active_school_id)
     
     return {
         "token": token,
@@ -478,36 +574,216 @@ async def login(data: UserLogin):
             "email": user["email"],
             "role": user["role"],
             "isActive": user["isActive"],
-            "createdAt": user["createdAt"]
+            "createdAt": user["createdAt"],
+            "activeSchoolId": active_school_id,
+            "schools": schools
         }
     }
 
-@api_router.get("/auth/me", response_model=UserResponse)
+@api_router.get("/auth/me", response_model=dict)
 async def get_me(user: dict = Depends(get_current_user)):
-    return UserResponse(
-        id=user["id"],
-        name=user["name"],
-        email=user["email"],
-        role=user["role"],
-        isActive=user["isActive"],
-        createdAt=user["createdAt"]
-    )
+    schools = await get_user_schools(user["id"])
+    active_school_id = user.get("activeSchoolId")
+    
+    # Get active school name
+    active_school = None
+    if active_school_id:
+        active_school = await db.schools.find_one({"id": active_school_id})
+    
+    return {
+        "id": user["id"],
+        "name": user["name"],
+        "email": user["email"],
+        "role": user["role"],
+        "isActive": user["isActive"],
+        "createdAt": user["createdAt"],
+        "activeSchoolId": active_school_id,
+        "activeSchoolName": active_school["name"] if active_school else None,
+        "activeSchoolSlug": active_school["slug"] if active_school else None,
+        "schools": schools
+    }
+
+@api_router.post("/auth/switch-school", response_model=dict)
+async def switch_school(schoolId: str, user: dict = Depends(get_current_user)):
+    """Switch active school for the current user"""
+    # Superadmins can switch to any school
+    if user["role"] != UserRole.SUPERADMIN:
+        link = await db.user_schools.find_one({"userId": user["id"], "schoolId": schoolId})
+        if not link:
+            raise HTTPException(status_code=403, detail="U heeft geen toegang tot deze school")
+    
+    school = await db.schools.find_one({"id": schoolId})
+    if not school:
+        raise HTTPException(status_code=404, detail="School niet gevonden")
+    
+    token = create_token(user["id"], user["role"], schoolId)
+    schools = await get_user_schools(user["id"])
+    
+    return {
+        "token": token,
+        "user": {
+            "id": user["id"],
+            "name": user["name"],
+            "email": user["email"],
+            "role": user["role"],
+            "isActive": user["isActive"],
+            "createdAt": user["createdAt"],
+            "activeSchoolId": schoolId,
+            "activeSchoolName": school["name"],
+            "activeSchoolSlug": school["slug"],
+            "schools": schools
+        }
+    }
+
+# ============ SCHOOLS ROUTES (Superadmin) ============
+
+@api_router.post("/auth/join-school", response_model=dict)
+async def join_school(schoolCode: str, user: dict = Depends(get_current_user)):
+    """Join a new school using an access code"""
+    school = await db.schools.find_one({"accessCode": schoolCode, "isActive": True})
+    if not school:
+        raise HTTPException(status_code=400, detail="Ongeldige schoolcode")
+    
+    # Check if already linked
+    existing_link = await db.user_schools.find_one({"userId": user["id"], "schoolId": school["id"]})
+    if existing_link:
+        raise HTTPException(status_code=400, detail="U bent al verbonden met deze school")
+    
+    # Create link
+    await db.user_schools.insert_one({
+        "id": str(uuid.uuid4()),
+        "userId": user["id"],
+        "schoolId": school["id"],
+        "role": UserRole.TEACHER,
+        "createdAt": now_iso()
+    })
+    
+    # Switch to new school
+    token = create_token(user["id"], user["role"], school["id"])
+    schools = await get_user_schools(user["id"])
+    
+    return {
+        "token": token,
+        "user": {
+            "id": user["id"],
+            "name": user["name"],
+            "email": user["email"],
+            "role": user["role"],
+            "isActive": user["isActive"],
+            "createdAt": user["createdAt"],
+            "activeSchoolId": school["id"],
+            "activeSchoolName": school["name"],
+            "activeSchoolSlug": school["slug"],
+            "schools": schools
+        }
+    }
+
+@api_router.post("/schools/{school_id}/link-user")
+async def link_user_to_school(school_id: str, userEmail: str, role: str = "teacher", user: dict = Depends(require_superadmin)):
+    """Superadmin: link an existing user to a school"""
+    school = await db.schools.find_one({"id": school_id})
+    if not school:
+        raise HTTPException(status_code=404, detail="School niet gevonden")
+    
+    target_user = await db.users.find_one({"email": userEmail.lower()})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Gebruiker niet gevonden")
+    
+    existing_link = await db.user_schools.find_one({"userId": target_user["id"], "schoolId": school_id})
+    if existing_link:
+        raise HTTPException(status_code=400, detail="Gebruiker is al verbonden met deze school")
+    
+    await db.user_schools.insert_one({
+        "id": str(uuid.uuid4()),
+        "userId": target_user["id"],
+        "schoolId": school_id,
+        "role": role,
+        "createdAt": now_iso()
+    })
+    
+    return {"success": True, "message": f"{target_user['name']} is verbonden met {school['name']}"}
+
+@api_router.get("/schools", response_model=List[SchoolResponse])
+async def get_schools(user: dict = Depends(require_superadmin)):
+    schools = await db.schools.find({}).sort("name", 1).to_list(1000)
+    return schools
+
+@api_router.post("/schools", response_model=SchoolResponse)
+async def create_school(data: SchoolCreate, user: dict = Depends(require_superadmin)):
+    existing = await db.schools.find_one({"slug": data.slug})
+    if existing:
+        raise HTTPException(status_code=400, detail="School met deze slug bestaat al")
+    
+    now = now_iso()
+    doc = {
+        "id": str(uuid.uuid4()),
+        **data.model_dump(),
+        "createdAt": now,
+        "updatedAt": now
+    }
+    await db.schools.insert_one(doc)
+    await log_audit(user["id"], "create", "school", doc["id"], {"name": data.name})
+    return {k: v for k, v in doc.items() if k != "_id"}
+
+@api_router.put("/schools/{school_id}", response_model=SchoolResponse)
+async def update_school(school_id: str, data: SchoolCreate, user: dict = Depends(require_superadmin)):
+    existing = await db.schools.find_one({"id": school_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="School niet gevonden")
+    
+    now = now_iso()
+    update_data = data.model_dump()
+    update_data["updatedAt"] = now
+    await db.schools.update_one({"id": school_id}, {"$set": update_data})
+    await log_audit(user["id"], "update", "school", school_id)
+    
+    updated = await db.schools.find_one({"id": school_id}, {"_id": 0})
+    return updated
+
+@api_router.delete("/schools/{school_id}")
+async def delete_school(school_id: str, user: dict = Depends(require_superadmin)):
+    existing = await db.schools.find_one({"id": school_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="School niet gevonden")
+    
+    await db.schools.delete_one({"id": school_id})
+    await log_audit(user["id"], "delete", "school", school_id)
+    return {"success": True}
+
+@api_router.patch("/schools/{school_id}/toggle-active")
+async def toggle_school_active(school_id: str, user: dict = Depends(require_superadmin)):
+    existing = await db.schools.find_one({"id": school_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="School niet gevonden")
+    
+    new_active = not existing.get("isActive", True)
+    await db.schools.update_one({"id": school_id}, {"$set": {"isActive": new_active, "updatedAt": now_iso()}})
+    await log_audit(user["id"], "toggle_active", "school", school_id, {"isActive": new_active})
+    
+    updated = await db.schools.find_one({"id": school_id}, {"_id": 0})
+    return updated
+
 
 # ============ CLASSES ROUTES ============
 
 @api_router.get("/classes", response_model=List[ClassResponse])
 async def get_classes(user: dict = Depends(get_current_user), includeInactive: bool = False):
+    school_id = get_school_id(user)
     query = {} if includeInactive else {"isActive": True}
+    if school_id:
+        query["schoolId"] = school_id
     classes = await db.classes.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
     return classes
 
 @api_router.post("/classes", response_model=ClassResponse)
 async def create_class(data: ClassCreate, user: dict = Depends(require_admin)):
+    school_id = get_school_id(user)
     now = now_iso()
     class_doc = {
         "id": str(uuid.uuid4()),
         "name": data.name,
         "isActive": data.isActive,
+        "schoolId": school_id,
         "createdAt": now,
         "updatedAt": now
     }
@@ -557,6 +833,7 @@ async def toggle_class_active(class_id: str, user: dict = Depends(require_admin)
 
 @api_router.post("/classes/import")
 async def import_classes(file: UploadFile = File(...), user: dict = Depends(require_admin)):
+    school_id = get_school_id(user)
     if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
         raise HTTPException(status_code=400, detail="Alleen Excel of CSV bestanden toegestaan")
     
@@ -586,7 +863,7 @@ async def import_classes(file: UploadFile = File(...), user: dict = Depends(requ
             if not class_name or class_name == 'nan':
                 continue
             
-            existing = await db.classes.find_one({"name": class_name})
+            existing = await db.classes.find_one({"name": class_name, "schoolId": school_id})
             if existing:
                 skipped += 1
                 continue
@@ -595,6 +872,7 @@ async def import_classes(file: UploadFile = File(...), user: dict = Depends(requ
                 "id": str(uuid.uuid4()),
                 "name": class_name,
                 "isActive": True,
+                "schoolId": school_id,
                 "createdAt": now,
                 "updatedAt": now
             }
@@ -612,13 +890,17 @@ async def import_classes(file: UploadFile = File(...), user: dict = Depends(requ
 
 @api_router.get("/study-types", response_model=List[StudyTypeResponse])
 async def get_study_types(user: dict = Depends(get_current_user), includeInactive: bool = False):
+    school_id = get_school_id(user)
     query = {} if includeInactive else {"isActive": True}
+    if school_id:
+        query["schoolId"] = school_id
     types = await db.study_types.find(query, {"_id": 0}).sort("mainType", 1).to_list(1000)
     return types
 
 @api_router.post("/study-types", response_model=StudyTypeResponse)
 async def create_study_type(data: StudyTypeCreate, user: dict = Depends(require_admin)):
-    existing = await db.study_types.find_one({"key": data.key})
+    school_id = get_school_id(user)
+    existing = await db.study_types.find_one({"key": data.key, "schoolId": school_id})
     if existing:
         raise HTTPException(status_code=400, detail="Studie met deze sleutel bestaat al")
     
@@ -626,6 +908,7 @@ async def create_study_type(data: StudyTypeCreate, user: dict = Depends(require_
     doc = {
         "id": str(uuid.uuid4()),
         **data.model_dump(),
+        "schoolId": school_id,
         "createdAt": now,
         "updatedAt": now
     }
@@ -731,6 +1014,7 @@ async def auto_generate_moments_for_rule(rule: dict):
             "studyTypeId": rule["studyTypeId"], "labelFull": label,
             "startTime": rule["startTime"], "endTime": rule["endTime"],
             "capacity": rule["defaultCapacity"], "isActive": True, "notes": None,
+            "schoolId": rule.get("schoolId"),
             "generatedFromRuleId": rule["id"], "createdAt": now, "updatedAt": now
         }
         await db.study_moments.insert_one(moment_doc)
@@ -742,7 +1026,10 @@ async def auto_generate_moments_for_rule(rule: dict):
 
 @api_router.get("/availability-rules", response_model=List[AvailabilityRuleResponse])
 async def get_availability_rules(user: dict = Depends(get_current_user), includeInactive: bool = False):
+    school_id = get_school_id(user)
     query = {} if includeInactive else {"isActive": True}
+    if school_id:
+        query["schoolId"] = school_id
     rules = await db.availability_rules.find(query, {"_id": 0}).to_list(1000)
     return rules
 
@@ -756,6 +1043,7 @@ async def create_availability_rule(data: AvailabilityRuleCreate, user: dict = De
     doc = {
         "id": str(uuid.uuid4()),
         **data.model_dump(),
+        "schoolId": get_school_id(user),
         "createdAt": now,
         "updatedAt": now
     }
@@ -818,16 +1106,21 @@ async def toggle_availability_rule_active(rule_id: str, user: dict = Depends(req
 
 @api_router.get("/exclusion-dates", response_model=List[ExclusionDateResponse])
 async def get_exclusion_dates(user: dict = Depends(get_current_user), includeInactive: bool = False):
+    school_id = get_school_id(user)
     query = {} if includeInactive else {"isActive": True}
+    if school_id:
+        query["schoolId"] = school_id
     dates = await db.exclusion_dates.find(query, {"_id": 0}).sort("date", 1).to_list(1000)
     return dates
 
 @api_router.post("/exclusion-dates", response_model=ExclusionDateResponse)
 async def create_exclusion_date(data: ExclusionDateCreate, user: dict = Depends(require_admin)):
+    school_id = get_school_id(user)
     now = now_iso()
     doc = {
         "id": str(uuid.uuid4()),
         **data.model_dump(),
+        "schoolId": school_id,
         "createdAt": now,
         "updatedAt": now
     }
@@ -871,7 +1164,11 @@ async def get_study_moments(
     dateTo: Optional[str] = None,
     includeInactive: bool = False
 ):
+    school_id = get_school_id(user)
     query = {} if includeInactive else {"isActive": True}
+    if school_id:
+        query["schoolId"] = school_id
+    logger.info(f"study-moments query: school_id={school_id}")
     
     if studyTypeId:
         query["studyTypeId"] = studyTypeId
@@ -902,11 +1199,14 @@ async def get_available_moments(
 ):
     """Get available study moments with capacity info for registration form"""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    school_id = get_school_id(user)
     
     query = {
         "isActive": True,
         "date": {"$gte": today}
     }
+    if school_id:
+        query["schoolId"] = school_id
     if studyTypeId:
         query["studyTypeId"] = studyTypeId
     
@@ -977,6 +1277,7 @@ async def create_study_moment(data: StudyMomentCreate, user: dict = Depends(requ
     doc = {
         "id": str(uuid.uuid4()),
         **data.model_dump(),
+        "schoolId": get_school_id(user),
         "createdAt": now,
         "updatedAt": now
     }
@@ -1038,7 +1339,10 @@ async def toggle_study_moment_active(moment_id: str, user: dict = Depends(requir
 async def generate_study_moments(data: GenerateMomentsRequest, user: dict = Depends(require_admin)):
     """Generate study moments from availability rules. Generates for the full validity period of each rule."""
     # Get active rules
+    school_id = get_school_id(user)
     rules_query = {"isActive": True}
+    if school_id:
+        rules_query["schoolId"] = school_id
     if data.studyTypeIds:
         rules_query["studyTypeId"] = {"$in": data.studyTypeIds}
     
@@ -1117,7 +1421,10 @@ async def get_registrations(
     teacherEmail: Optional[str] = None,
     search: Optional[str] = None
 ):
+    school_id = get_school_id(user)
     query = {}
+    if school_id:
+        query["schoolId"] = school_id
     
     if dateFrom:
         query["date"] = {"$gte": dateFrom}
@@ -1159,8 +1466,9 @@ async def get_my_registrations(user: dict = Depends(get_current_user)):
     """Get registrations created by current user with attendance status"""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
+    school_id = get_school_id(user)
     registrations = await db.registrations.find(
-        {"teacherEmail": user["email"]},
+        {"teacherEmail": user["email"], **(({"schoolId": school_id}) if school_id else {})},
         {"_id": 0}
     ).sort("createdAt", -1).to_list(1000)
     
@@ -1180,6 +1488,8 @@ async def get_my_registrations(user: dict = Depends(get_current_user)):
         att = attendance_map.get(reg["id"])
         if att:
             reg["attendanceStatus"] = "present" if att["isPresent"] else "absent"
+            reg["absenceReason"] = att.get("absenceReason")
+            reg["educatorNote"] = att.get("educatorNote")
         elif reg["date"] < today and reg["status"] == "registered":
             # Past date, no attendance recorded = potentially absent
             reg["attendanceStatus"] = "unknown"
@@ -1244,6 +1554,7 @@ async def create_registration(data: RegistrationCreate, user: dict = Depends(get
         "studyMomentId": data.studyMomentId,
         "status": RegistrationStatus.REGISTERED,
         "note": data.note,
+        "schoolId": get_school_id(user),
         "confirmationEmailSent": False,  # Email is mocked
         "absenceEmailSent": False,
         "createdAt": now,
@@ -1324,8 +1635,12 @@ async def get_attendance(
 @api_router.get("/attendance/by-date/{date}", response_model=List[dict])
 async def get_attendance_by_date(date: str, user: dict = Depends(require_educator_or_admin)):
     """Get all study moments and their registrations for a specific date. Auto-creates 'present' attendance records."""
+    school_id = get_school_id(user)
+    moment_query = {"date": date, "isActive": True}
+    if school_id:
+        moment_query["schoolId"] = school_id
     moments = await db.study_moments.find(
-        {"date": date, "isActive": True},
+        moment_query,
         {"_id": 0}
     ).to_list(1000)
     
@@ -1562,7 +1877,11 @@ async def update_attendance(att_id: str, data: AttendanceUpdate, user: dict = De
 
 @api_router.get("/email-templates", response_model=List[EmailTemplateResponse])
 async def get_email_templates(user: dict = Depends(require_admin)):
-    templates = await db.email_templates.find({}, {"_id": 0}).to_list(100)
+    school_id = get_school_id(user)
+    query = {}
+    if school_id:
+        query["schoolId"] = school_id
+    templates = await db.email_templates.find(query, {"_id": 0}).to_list(100)
     return templates
 
 @api_router.post("/email-templates", response_model=EmailTemplateResponse)
@@ -1575,6 +1894,7 @@ async def create_email_template(data: EmailTemplateCreate, user: dict = Depends(
     doc = {
         "id": str(uuid.uuid4()),
         **data.model_dump(),
+        "schoolId": get_school_id(user),
         "createdAt": now,
         "updatedAt": now
     }
@@ -1661,7 +1981,10 @@ async def get_reports_summary(
     dateFrom: Optional[str] = None,
     dateTo: Optional[str] = None
 ):
+    school_id = get_school_id(user)
     query = {}
+    if school_id:
+        query["schoolId"] = school_id
     if dateFrom:
         query["date"] = {"$gte": dateFrom}
     if dateTo:
@@ -1677,32 +2000,49 @@ async def get_reports_summary(
     registered = await db.registrations.count_documents({**query, "status": RegistrationStatus.REGISTERED})
     cancelled = await db.registrations.count_documents({**query, "status": RegistrationStatus.CANCELLED})
     
-    # Attendance stats
-    att_query = {}
-    if dateFrom:
-        att_query["date"] = {"$gte": dateFrom}
-    if dateTo:
-        if "date" in att_query:
-            att_query["date"]["$lte"] = dateTo
-        else:
-            att_query["date"] = {"$lte": dateTo}
+    # Attendance stats — default is present, only explicitly absent counts as absent
+    active_regs = await db.registrations.find({**query, "status": RegistrationStatus.REGISTERED}, {"_id": 0, "id": 1}).to_list(10000)
+    active_reg_ids = [r["id"] for r in active_regs]
+    total_active = len(active_reg_ids)
     
-    total_attendance = await db.attendance.count_documents(att_query)
-    present = await db.attendance.count_documents({**att_query, "isPresent": True})
-    absent = await db.attendance.count_documents({**att_query, "isPresent": False})
+    # Count explicitly absent
+    absent = 0
+    if active_reg_ids:
+        absent = await db.attendance.count_documents({
+            "registrationId": {"$in": active_reg_ids},
+            "isPresent": False
+        })
+    present = total_active - absent
     
-    # By study type
-    study_types = await db.study_types.find({"isActive": True}, {"_id": 0}).to_list(100)
+    # By study type (filtered by school)
+    st_query = {"isActive": True}
+    if school_id:
+        st_query["schoolId"] = school_id
+    study_types = await db.study_types.find(st_query, {"_id": 0}).to_list(100)
     by_study_type = []
     for st in study_types:
         count = await db.registrations.count_documents({**query, "studyTypeId": st["id"]})
+        # Attendance per study type
+        st_regs = await db.registrations.find({**query, "studyTypeId": st["id"], "status": RegistrationStatus.REGISTERED}, {"_id": 0, "id": 1}).to_list(10000)
+        st_reg_ids = [r["id"] for r in st_regs]
+        st_absent = 0
+        if st_reg_ids:
+            st_absent = await db.attendance.count_documents({"registrationId": {"$in": st_reg_ids}, "isPresent": False})
+        st_present = len(st_reg_ids) - st_absent
         by_study_type.append({
             "studyType": st,
-            "count": count
+            "count": count,
+            "present": st_present,
+            "absent": st_absent,
+            "total": len(st_reg_ids),
+            "rate": round(st_present / len(st_reg_ids) * 100, 1) if st_reg_ids else 0
         })
     
-    # By class
-    classes = await db.classes.find({"isActive": True}, {"_id": 0}).to_list(100)
+    # By class (filtered by school)
+    cls_query = {"isActive": True}
+    if school_id:
+        cls_query["schoolId"] = school_id
+    classes = await db.classes.find(cls_query, {"_id": 0}).to_list(100)
     by_class = []
     for cls in classes:
         count = await db.registrations.count_documents({**query, "classId": cls["id"]})
@@ -1716,10 +2056,10 @@ async def get_reports_summary(
         "registered": registered,
         "cancelled": cancelled,
         "attendance": {
-            "total": total_attendance,
+            "total": total_active,
             "present": present,
             "absent": absent,
-            "rate": round(present / total_attendance * 100, 1) if total_attendance > 0 else 0
+            "rate": round(present / total_active * 100, 1) if total_active > 0 else 0
         },
         "byStudyType": by_study_type,
         "byClass": by_class
@@ -1731,7 +2071,10 @@ async def export_registrations(
     dateFrom: Optional[str] = None,
     dateTo: Optional[str] = None
 ):
+    school_id = get_school_id(user)
     query = {}
+    if school_id:
+        query["schoolId"] = school_id
     if dateFrom:
         query["date"] = {"$gte": dateFrom}
     if dateTo:
@@ -1757,7 +2100,10 @@ async def get_attendance_detail(
     classId: Optional[str] = None
 ):
     """Detailed attendance report with percentages per student, class, study type"""
+    school_id = get_school_id(user)
     reg_query = {"status": RegistrationStatus.REGISTERED}
+    if school_id:
+        reg_query["schoolId"] = school_id
     if dateFrom:
         reg_query["date"] = {"$gte": dateFrom}
     if dateTo:
@@ -1814,7 +2160,11 @@ async def get_attendance_detail(
                 study_type_stats[reg["studyTypeId"]]["absent"] += 1
                 total_absent += 1
         else:
-            total_unchecked += 1
+            # Default: no attendance record means student was present
+            student_stats[student_key]["present"] += 1
+            class_stats[reg["classId"]]["present"] += 1
+            study_type_stats[reg["studyTypeId"]]["present"] += 1
+            total_present += 1
     
     by_student = []
     for s in student_stats.values():
@@ -1881,13 +2231,16 @@ async def get_dashboard_stats(user: dict = Depends(get_current_user)):
     yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
     
     # Today's moments
-    today_moments = await db.study_moments.count_documents({"date": today, "isActive": True})
+    school_id = get_school_id(user)
+    moment_q = {"date": today, "isActive": True}
+    reg_q = {"date": today, "status": RegistrationStatus.REGISTERED}
+    if school_id:
+        moment_q["schoolId"] = school_id
+        reg_q["schoolId"] = school_id
+    today_moments = await db.study_moments.count_documents(moment_q)
     
     # Today's registrations
-    today_registrations = await db.registrations.count_documents({
-        "date": today,
-        "status": RegistrationStatus.REGISTERED
-    })
+    today_registrations = await db.registrations.count_documents(reg_q)
     
     # User's registrations (if teacher)
     my_registrations = 0
@@ -1914,10 +2267,10 @@ async def get_dashboard_stats(user: dict = Depends(get_current_user)):
     
     # This week stats
     week_start = (datetime.now(timezone.utc) - timedelta(days=datetime.now(timezone.utc).weekday())).strftime("%Y-%m-%d")
-    week_registrations = await db.registrations.count_documents({
-        "date": {"$gte": week_start},
-        "status": RegistrationStatus.REGISTERED
-    })
+    week_q = {"date": {"$gte": week_start}, "status": RegistrationStatus.REGISTERED}
+    if school_id:
+        week_q["schoolId"] = school_id
+    week_registrations = await db.registrations.count_documents(week_q)
     
     return {
         "today": {
@@ -1934,7 +2287,10 @@ async def get_dashboard_stats(user: dict = Depends(get_current_user)):
 
 @api_router.get("/students", response_model=List[StudentResponse])
 async def get_students(user: dict = Depends(get_current_user), search: Optional[str] = None, classId: Optional[str] = None, includeInactive: bool = False):
+    school_id = get_school_id(user)
     query = {} if includeInactive else {"isActive": True}
+    if school_id:
+        query["schoolId"] = school_id
     if classId:
         query["classId"] = classId
     
@@ -1959,9 +2315,13 @@ async def search_students(query: str, user: dict = Depends(get_current_user)):
         return []
     
     # Search with regex
+    school_id = get_school_id(user)
     search_regex = {"$regex": query, "$options": "i"}
+    find_query = {"name": search_regex, "isActive": True}
+    if school_id:
+        find_query["schoolId"] = school_id
     students = await db.students.find(
-        {"name": search_regex, "isActive": True},
+        find_query,
         {"_id": 0}
     ).limit(20).to_list(20)
     
@@ -1974,6 +2334,7 @@ async def search_students(query: str, user: dict = Depends(get_current_user)):
 
 @api_router.post("/students", response_model=StudentResponse)
 async def create_student(data: StudentCreate, user: dict = Depends(require_admin)):
+    school_id = get_school_id(user)
     now = now_iso()
     student_doc = {
         "id": str(uuid.uuid4()),
@@ -1981,6 +2342,7 @@ async def create_student(data: StudentCreate, user: dict = Depends(require_admin
         "classId": data.classId,
         "email": data.email,
         "isActive": data.isActive,
+        "schoolId": school_id,
         "createdAt": now,
         "updatedAt": now
     }
@@ -1994,6 +2356,7 @@ async def create_student(data: StudentCreate, user: dict = Depends(require_admin
 @api_router.post("/students/import")
 async def import_students(file: UploadFile = File(...), user: dict = Depends(require_superadmin)):
     """Import students from Excel file (superadmin only)"""
+    school_id = get_school_id(user)
     if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
         raise HTTPException(status_code=400, detail="Alleen Excel of CSV bestanden toegestaan")
     
@@ -2028,8 +2391,11 @@ async def import_students(file: UploadFile = File(...), user: dict = Depends(req
         skipped = 0
         errors = []
         
-        # Get all classes for lookup
-        classes = await db.classes.find({}, {"_id": 0}).to_list(1000)
+        # Get all classes for lookup (filtered by school)
+        class_query = {}
+        if school_id:
+            class_query["schoolId"] = school_id
+        classes = await db.classes.find(class_query, {"_id": 0}).to_list(1000)
         class_map = {c["name"].lower(): c["id"] for c in classes}
         
         for idx, row in df.iterrows():
@@ -2062,6 +2428,7 @@ async def import_students(file: UploadFile = File(...), user: dict = Depends(req
                 "classId": class_id,
                 "email": None,
                 "isActive": True,
+                "schoolId": school_id,
                 "createdAt": now,
                 "updatedAt": now
             }
@@ -2322,6 +2689,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup_db():
+    await db.init_tables()
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    client.close()
+    db.close()

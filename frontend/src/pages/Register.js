@@ -6,15 +6,17 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { toast } from 'sonner';
-import { BookOpen, Loader2, Eye, EyeOff } from 'lucide-react';
+import { BookOpen, Loader2, Eye, EyeOff, KeyRound } from 'lucide-react';
 
 export default function Register() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [schoolCode, setSchoolCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  
   const { register } = useAuth();
   const navigate = useNavigate();
 
@@ -34,7 +36,7 @@ export default function Register() {
     setLoading(true);
 
     try {
-      const user = await register(name, email, password, confirmPassword);
+      const user = await register(name, email, password, confirmPassword, schoolCode || null);
       toast.success(`Welkom ${user.name}! Uw account is aangemaakt.`);
       navigate('/dashboard');
     } catch (error) {
@@ -92,6 +94,26 @@ export default function Register() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
+              {/* School code */}
+              <div className="space-y-2">
+                <Label htmlFor="schoolCode">
+                  <span className="flex items-center gap-1.5">
+                    <KeyRound className="w-4 h-4" />
+                    Schoolcode
+                  </span>
+                </Label>
+                <Input
+                  id="schoolCode"
+                  type="text"
+                  placeholder="Voer de code van uw school in"
+                  value={schoolCode}
+                  onChange={(e) => setSchoolCode(e.target.value.toUpperCase())}
+                  data-testid="register-school-code-input"
+                  className="h-11 font-mono tracking-wider uppercase"
+                />
+                <p className="text-xs text-slate-400">Vraag de schoolcode aan uw schoolbeheerder</p>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="name">Naam</Label>
                 <Input

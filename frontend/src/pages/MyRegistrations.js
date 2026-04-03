@@ -35,7 +35,8 @@ import {
   Clock,
   XCircle,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  MessageSquare
 } from 'lucide-react';
 
 export default function MyRegistrations() {
@@ -268,6 +269,19 @@ export default function MyRegistrations() {
                       </span>
                     </div>
                   </div>
+                  {reg.attendanceStatus === 'absent' && (reg.educatorNote || reg.absenceReason) && (
+                    <div className="p-2.5 bg-rose-100/60 rounded-md space-y-1 mb-3">
+                      {reg.absenceReason && (
+                        <p className="text-xs text-rose-700"><span className="font-semibold">Reden:</span> {reg.absenceReason}</p>
+                      )}
+                      {reg.educatorNote && (
+                        <p className="text-xs text-rose-700 flex items-start gap-1">
+                          <MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                          <span><span className="font-semibold">Opmerking opvoeder:</span> {reg.educatorNote}</span>
+                        </p>
+                      )}
+                    </div>
+                  )}
                   {reg.status === 'registered' && (
                     <Button
                       variant="outline"
@@ -316,9 +330,24 @@ export default function MyRegistrations() {
                       <TableCell>{formatDateShort(reg.date)}</TableCell>
                       <TableCell>{reg.startTime} - {reg.endTime}</TableCell>
                       <TableCell>
-                        {getAttendanceBadge(reg) || (
-                          <span className="text-slate-400 text-sm">-</span>
-                        )}
+                        <div>
+                          {getAttendanceBadge(reg) || (
+                            <span className="text-slate-400 text-sm">-</span>
+                          )}
+                          {reg.attendanceStatus === 'absent' && (reg.educatorNote || reg.absenceReason) && (
+                            <div className="mt-1 space-y-0.5">
+                              {reg.absenceReason && (
+                                <p className="text-xs text-rose-600"><span className="font-semibold">Reden:</span> {reg.absenceReason}</p>
+                              )}
+                              {reg.educatorNote && (
+                                <p className="text-xs text-rose-600 flex items-start gap-1">
+                                  <MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                                  <span>{reg.educatorNote}</span>
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <span className={`status-badge ${getStatusBadgeClass(reg.status)}`}>
