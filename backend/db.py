@@ -102,7 +102,8 @@ class Database:
     """Mimics the previous Database interface, backed by real MongoDB."""
 
     def __init__(self, mongo_url: str, db_name: str):
-        self._client = AsyncIOMotorClient(mongo_url)
+        import certifi
+        self._client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where())
         self._db = self._client[db_name]
         self._collections = {}
 
@@ -117,47 +118,47 @@ class Database:
         return Collection(self._db[name])
 
     async def init_tables(self):
-        """Create indexes for commonly queried fields."""
-        # Users
-        await self._db.users.create_index("id", unique=True)
-        await self._db.users.create_index("email", unique=True)
-        # Schools
-        await self._db.schools.create_index("id", unique=True)
-        await self._db.schools.create_index("slug", unique=True)
-        await self._db.schools.create_index("accessCode")
-        # User-School links
-        await self._db.user_schools.create_index("id", unique=True)
-        await self._db.user_schools.create_index([("userId", 1), ("schoolId", 1)])
-        # Classes
-        await self._db.classes.create_index("id", unique=True)
-        await self._db.classes.create_index("schoolId")
-        # Study Types
-        await self._db.study_types.create_index("id", unique=True)
-        await self._db.study_types.create_index("schoolId")
-        # Availability Rules
-        await self._db.availability_rules.create_index("id", unique=True)
-        await self._db.availability_rules.create_index("schoolId")
-        # Exclusion Dates
-        await self._db.exclusion_dates.create_index("id", unique=True)
-        await self._db.exclusion_dates.create_index("schoolId")
-        # Study Moments
-        await self._db.study_moments.create_index("id", unique=True)
-        await self._db.study_moments.create_index("schoolId")
-        await self._db.study_moments.create_index("date")
-        # Registrations
-        await self._db.registrations.create_index("id", unique=True)
-        await self._db.registrations.create_index("schoolId")
-        await self._db.registrations.create_index("studyMomentId")
-        # Attendance
-        await self._db.attendance.create_index("id", unique=True)
-        await self._db.attendance.create_index("studyMomentId")
-        # Students
-        await self._db.students.create_index("id", unique=True)
-        await self._db.students.create_index("schoolId")
-        # Audit Logs
-        await self._db.audit_logs.create_index("id", unique=True)
-        # Email Templates
-        await self._db.email_templates.create_index("id", unique=True)
+        """Create indexes for commonly queried fields.
+        Each index creation is wrapped in try/except to prevent
+        container crashes on restart if indexes conflict."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        index_definitions = [
+            ("users", "id", True),
+            ("users", "email", True),
+            ("schools", "id", True),
+            ("schools", "slug", True),
+            ("schools", "accessCode", False),
+            ("user_schools", "id", True),
+            ("user_schools", [("userId", 1), ("schoolId", 1)], False),
+            ("classes", "id", True),
+            ("classes", "schoolId", False),
+            ("study_types", "id", True),
+            ("study_types", "schoolId", False),
+            ("availability_rules", "id", True),
+            ("availability_rules", "schoolId", False),
+            ("exclusion_dates", "id", True),
+            ("exclusion_dates", "schoolId", False),
+            ("study_moments", "id", True),
+            ("study_moments", "schoolId", False),
+            ("study_moments", "date", False),
+            ("registrations", "id", True),
+            ("registrations", "schoolId", False),
+            ("registrations", "studyMomentId", False),
+            ("attendance", "id", True),
+            ("attendance", "studyMomentId", False),
+            ("students", "id", True),
+            ("students", "schoolId", False),
+            ("audit_logs", "id", True),
+            ("email_templates", "id", True),
+        ]
+        
+        for col_name, key, unique in index_definitions:
+            try:
+                await self._db[col_name].create_index(key, unique=unique)
+            except Exception as e:
+                logger.warning(f"Index creation skipped for {col_name}.{key}: {e}")
 
     def close(self):
         self._client.close()
