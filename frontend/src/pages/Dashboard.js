@@ -84,11 +84,7 @@ export default function Dashboard() {
           <Button asChild className="bg-[#2E5C5A] hover:bg-[#244A48]" data-testid="new-registration-btn">
             <Link to="/aanmelden"><UserPlus className="w-4 h-4 mr-2" />Nieuwe aanmelding</Link>
           </Button>
-          {isAdmin() && (
-            <Button variant="outline" onClick={handleSeedData} disabled={seeding} data-testid="seed-data-btn">
-              {seeding ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}Voorbeelddata
-            </Button>
-          )}
+
         </div>
       </div>
 
