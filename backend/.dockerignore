@@ -1,0 +1,17 @@
+__pycache__
+*.pyc
+*.pyo
+*.db
+tests/
+*.md
+debug_*
+check_*
+list_*
+reset_*
+users_output.txt
+requirements.txt
+node_modules/
+package.json
+package-lock.json
+*.js
+sqlite_export.json

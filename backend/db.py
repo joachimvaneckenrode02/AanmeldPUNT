@@ -1,14 +1,17 @@
 """
-SQLite database layer with a MongoDB-compatible async API.
-Drop-in replacement for motor.motor_asyncio — no external DB needed.
+MongoDB Atlas database layer using Motor (async MongoDB driver).
+Drop-in replacement for the previous SQLite-based db.py.
 """
-import aiosqlite
-import json
-import re
-import uuid
+import os
 from pathlib import Path
+from dotenv import load_dotenv
+from motor.motor_asyncio import AsyncIOMotorClient
 
-DB_PATH = Path(__file__).parent / "aanmeldpunt.db"
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / '.env')
+
+MONGO_URL = os.environ.get('MONGO_URL')
+DB_NAME = os.environ.get('DB_NAME', 'aanmeldpunt')
 
 COLLECTIONS = [
     "users", "schools", "user_schools", "classes", "study_types",
@@ -17,252 +20,153 @@ COLLECTIONS = [
 ]
 
 
-# ── Query / update helpers ───────────────────────────────────────────────────
+# ── Cursor wrapper ───────────────────────────────────────────────────────────
 
-def _match(doc: dict, query: dict) -> bool:
-    """Evaluate a MongoDB-style filter against a plain dict."""
-    for key, val in query.items():
-        if key == "_id":
-            continue
-        doc_val = doc.get(key)
-        if isinstance(val, dict):
-            # Collect operators for this field
-            ops = val
-            # Handle $regex + $options together
-            if "$regex" in ops:
-                pattern = ops["$regex"]
-                options = ops.get("$options", "")
-                flags = 0
-                if "i" in options:
-                    flags |= re.IGNORECASE
-                if doc_val is None or not re.search(pattern, str(doc_val), flags):
-                    return False
-                # Skip $options since we already handled it
-                remaining = {k: v for k, v in ops.items() if k not in ("$regex", "$options")}
-            else:
-                remaining = ops
+class _CursorWrapper:
+    """Wraps a Motor cursor to ensure _id is excluded from results."""
 
-            for op, op_val in remaining.items():
-                if op == "$in":
-                    if doc_val not in op_val:
-                        return False
-                elif op == "$nin":
-                    if doc_val in op_val:
-                        return False
-                elif op == "$ne":
-                    if doc_val == op_val:
-                        return False
-                elif op == "$gt":
-                    if doc_val is None or doc_val <= op_val:
-                        return False
-                elif op == "$gte":
-                    if doc_val is None or doc_val < op_val:
-                        return False
-                elif op == "$lt":
-                    if doc_val is None or doc_val >= op_val:
-                        return False
-                elif op == "$lte":
-                    if doc_val is None or doc_val > op_val:
-                        return False
-                elif op == "$exists":
-                    if op_val and doc_val is None:
-                        return False
-                    if not op_val and doc_val is not None:
-                        return False
-        else:
-            if doc_val != val:
-                return False
-    return True
-
-
-def _apply_update(doc: dict, update: dict) -> dict:
-    """Apply MongoDB-style update operators ($set, $unset, $inc, $push)."""
-    if "$set" in update:
-        doc.update(update["$set"])
-    if "$unset" in update:
-        for k in update["$unset"]:
-            doc.pop(k, None)
-    if "$inc" in update:
-        for k, v in update["$inc"].items():
-            doc[k] = doc.get(k, 0) + v
-    if "$push" in update:
-        for k, v in update["$push"].items():
-            doc.setdefault(k, []).append(v)
-    return doc
-
-
-# ── Cursor ───────────────────────────────────────────────────────────────────
-
-class _Cursor:
-    def __init__(self, db_path: str, table: str, query: dict):
-        self._db_path = db_path
-        self._table = table
-        self._query = query
-        self._sort_key: str | None = None
-        self._sort_dir: int = 1
-        self._limit: int | None = None
+    def __init__(self, cursor):
+        self._cursor = cursor
 
     def sort(self, key, direction=1):
-        self._sort_key = key
-        self._sort_dir = direction
+        self._cursor = self._cursor.sort(key, direction)
         return self
 
     def limit(self, n: int):
-        self._limit = n
+        self._cursor = self._cursor.limit(n)
         return self
 
     def skip(self, n: int):
-        # skip is rarely used but prevents AttributeError
+        self._cursor = self._cursor.skip(n)
         return self
 
     async def to_list(self, length=None):
-        async with aiosqlite.connect(self._db_path) as conn:
-            await _ensure_table(conn, self._table)
-            async with conn.execute(f"SELECT data FROM {self._table}") as cur:
-                rows = await cur.fetchall()
-
-        docs = [json.loads(r[0]) for r in rows]
-        docs = [d for d in docs if _match(d, self._query)]
-
-        if self._sort_key:
-            docs.sort(
-                key=lambda x: (x.get(self._sort_key) is None, x.get(self._sort_key, "")),
-                reverse=(self._sort_dir == -1),
-            )
-        if length is not None:
-            docs = docs[:length]
-        if self._limit is not None:
-            docs = docs[:self._limit]
+        docs = await self._cursor.to_list(length=length)
+        # Strip _id from all documents
+        for doc in docs:
+            doc.pop("_id", None)
         return docs
 
 
-# ── Table helper ─────────────────────────────────────────────────────────────
-
-async def _ensure_table(conn, name: str):
-    await conn.execute(
-        f"CREATE TABLE IF NOT EXISTS {name} "
-        "(id TEXT PRIMARY KEY, data TEXT NOT NULL)"
-    )
-
-
-# ── Collection ───────────────────────────────────────────────────────────────
+# ── Collection wrapper ───────────────────────────────────────────────────────
 
 class Collection:
-    def __init__(self, db_path: str, name: str):
-        self._db_path = db_path
-        self._name = name
+    """Wraps a Motor collection to auto-exclude _id from results."""
 
-    # -- internal helpers
-    async def _all(self, conn) -> list[dict]:
-        await _ensure_table(conn, self._name)
-        async with conn.execute(f"SELECT data FROM {self._name}") as cur:
-            rows = await cur.fetchall()
-        return [json.loads(r[0]) for r in rows]
+    def __init__(self, motor_collection):
+        self._col = motor_collection
 
-    # -- public API (mirrors motor)
     async def find_one(self, query=None, projection=None):
         query = query or {}
-        async with aiosqlite.connect(self._db_path) as conn:
-            docs = await self._all(conn)
-        for doc in docs:
-            if _match(doc, query):
-                return doc
-        return None
+        # Always exclude _id unless explicitly requested
+        if projection is None:
+            projection = {"_id": 0}
+        elif isinstance(projection, dict) and "_id" not in projection:
+            projection["_id"] = 0
+        doc = await self._col.find_one(query, projection)
+        return doc
 
     def find(self, query=None, projection=None):
-        return _Cursor(self._db_path, self._name, query or {})
+        query = query or {}
+        if projection is None:
+            projection = {"_id": 0}
+        elif isinstance(projection, dict) and "_id" not in projection:
+            projection["_id"] = 0
+        cursor = self._col.find(query, projection)
+        return _CursorWrapper(cursor)
 
     async def insert_one(self, doc: dict):
         doc.pop("_id", None)
-        doc_id = doc.setdefault("id", str(uuid.uuid4()))
-        async with aiosqlite.connect(self._db_path) as conn:
-            await _ensure_table(conn, self._name)
-            await conn.execute(
-                f"INSERT OR REPLACE INTO {self._name} (id, data) VALUES (?, ?)",
-                (doc_id, json.dumps(doc)),
-            )
-            await conn.commit()
+        return await self._col.insert_one(doc)
 
     async def update_one(self, query: dict, update: dict):
-        async with aiosqlite.connect(self._db_path) as conn:
-            docs = await self._all(conn)
-            for doc in docs:
-                if _match(doc, query):
-                    _apply_update(doc, update)
-                    await conn.execute(
-                        f"UPDATE {self._name} SET data = ? WHERE id = ?",
-                        (json.dumps(doc), doc["id"]),
-                    )
-                    await conn.commit()
-                    return
+        return await self._col.update_one(query, update)
 
     async def update_many(self, query: dict, update: dict):
-        async with aiosqlite.connect(self._db_path) as conn:
-            docs = await self._all(conn)
-            for doc in docs:
-                if _match(doc, query):
-                    _apply_update(doc, update)
-                    await conn.execute(
-                        f"UPDATE {self._name} SET data = ? WHERE id = ?",
-                        (json.dumps(doc), doc["id"]),
-                    )
-            await conn.commit()
+        return await self._col.update_many(query, update)
 
     async def delete_one(self, query: dict):
-        async with aiosqlite.connect(self._db_path) as conn:
-            docs = await self._all(conn)
-            for doc in docs:
-                if _match(doc, query):
-                    await conn.execute(
-                        f"DELETE FROM {self._name} WHERE id = ?", (doc["id"],)
-                    )
-                    await conn.commit()
-                    return
+        return await self._col.delete_one(query)
 
     async def delete_many(self, query: dict):
-        async with aiosqlite.connect(self._db_path) as conn:
-            docs = await self._all(conn)
-            for doc in docs:
-                if _match(doc, query):
-                    await conn.execute(
-                        f"DELETE FROM {self._name} WHERE id = ?", (doc["id"],)
-                    )
-            await conn.commit()
+        return await self._col.delete_many(query)
 
     async def count_documents(self, query=None):
         query = query or {}
-        async with aiosqlite.connect(self._db_path) as conn:
-            docs = await self._all(conn)
-        return sum(1 for d in docs if _match(d, query))
+        return await self._col.count_documents(query)
 
 
 # ── Database ─────────────────────────────────────────────────────────────────
 
 class Database:
-    """Mimics a Motor database object: `db.collection_name` returns a Collection."""
+    """Mimics the previous Database interface, backed by real MongoDB."""
 
-    def __init__(self, db_path: str | Path):
-        self._db_path = str(db_path)
+    def __init__(self, mongo_url: str, db_name: str):
+        self._client = AsyncIOMotorClient(mongo_url)
+        self._db = self._client[db_name]
+        self._collections = {}
 
     def __getattr__(self, name: str) -> Collection:
         if name.startswith("_"):
             raise AttributeError(name)
-        return Collection(self._db_path, name)
+        if name not in self._collections:
+            self._collections[name] = Collection(self._db[name])
+        return self._collections[name]
 
     def get_collection(self, name: str) -> Collection:
-        return Collection(self._db_path, name)
+        return Collection(self._db[name])
 
     async def init_tables(self):
-        async with aiosqlite.connect(self._db_path) as conn:
-            for table in COLLECTIONS:
-                await _ensure_table(conn, table)
-            await conn.commit()
+        """Create indexes for commonly queried fields."""
+        # Users
+        await self._db.users.create_index("id", unique=True)
+        await self._db.users.create_index("email", unique=True)
+        # Schools
+        await self._db.schools.create_index("id", unique=True)
+        await self._db.schools.create_index("slug", unique=True)
+        await self._db.schools.create_index("accessCode")
+        # User-School links
+        await self._db.user_schools.create_index("id", unique=True)
+        await self._db.user_schools.create_index([("userId", 1), ("schoolId", 1)])
+        # Classes
+        await self._db.classes.create_index("id", unique=True)
+        await self._db.classes.create_index("schoolId")
+        # Study Types
+        await self._db.study_types.create_index("id", unique=True)
+        await self._db.study_types.create_index("schoolId")
+        # Availability Rules
+        await self._db.availability_rules.create_index("id", unique=True)
+        await self._db.availability_rules.create_index("schoolId")
+        # Exclusion Dates
+        await self._db.exclusion_dates.create_index("id", unique=True)
+        await self._db.exclusion_dates.create_index("schoolId")
+        # Study Moments
+        await self._db.study_moments.create_index("id", unique=True)
+        await self._db.study_moments.create_index("schoolId")
+        await self._db.study_moments.create_index("date")
+        # Registrations
+        await self._db.registrations.create_index("id", unique=True)
+        await self._db.registrations.create_index("schoolId")
+        await self._db.registrations.create_index("studyMomentId")
+        # Attendance
+        await self._db.attendance.create_index("id", unique=True)
+        await self._db.attendance.create_index("studyMomentId")
+        # Students
+        await self._db.students.create_index("id", unique=True)
+        await self._db.students.create_index("schoolId")
+        # Audit Logs
+        await self._db.audit_logs.create_index("id", unique=True)
+        # Email Templates
+        await self._db.email_templates.create_index("id", unique=True)
 
     def close(self):
-        pass  # SQLite connections are opened/closed per request
+        self._client.close()
 
 
 # ── Factory ──────────────────────────────────────────────────────────────────
 
-def create_db(path: Path = DB_PATH) -> Database:
-    return Database(path)
+def create_db(path=None) -> Database:
+    """Create a Database backed by MongoDB Atlas.
+    The `path` argument is ignored (kept for backward compatibility).
+    """
+    return Database(MONGO_URL, DB_NAME)

@@ -81,6 +81,24 @@ android-sdk/ frontend/node_modules/.cache/default-development/0.pack
 frontend/node_modules/.cache/default-development/2.pack
 frontend/node_modules/.cache/default-development/0.pack
 -e 
-# Environment files
+# Environment files - NEVER push these (contains passwords/secrets)
 *.env
 *.env.*
+.env
+.env.*
+backend/.env
+frontend/.env
+frontend/.env.production
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+sqlite_export.json
+
+# Migration/debug scripts with sensitive data
+backend/check_mongo*.js
+backend/check_mongo*.py
+backend/migrate_via_api.js
+backend/export_sqlite.js
+backend/users_output.txt
